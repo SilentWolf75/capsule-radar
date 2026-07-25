@@ -4,16 +4,21 @@
 #include "radar_view.h"
 #include "route.h"
 #include "photo.h"
+#include "airline.h"
+#include "vessel.h"
+#include "wildfire.h"
 #include "weather.h"
 #include "wx_radar.h"
 #include "cloud_image.h"
 #include "airports.h"
+#include "geo.h"
 #include "config.h"
 #include <lvgl.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #define UI_GREEN lv_color_hex(0x1DFF86)
 #define UI_INK   lv_color_hex(0xEAFFF3)
@@ -24,13 +29,27 @@
 
 static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
+static lv_obj_t *s_tileClock = nullptr, *s_tileTracked = nullptr;
+static lv_obj_t *s_trkTitle = nullptr, *s_trkRoute = nullptr, *s_trkBar = nullptr;
+static lv_obj_t *s_trkFrom = nullptr, *s_trkTo = nullptr, *s_trkPct = nullptr;
+static lv_obj_t *s_trkStats = nullptr, *s_trkEta = nullptr, *s_trkHint = nullptr;
+static lv_obj_t *s_cardTrackBtn = nullptr, *s_cardTrackLbl = nullptr;
+static char s_trackHex[8] = "";      // tracked contact (empty = nothing tracked)
+static char s_trackCall[12] = "";
+static lv_obj_t *s_clockTime = nullptr, *s_clockDate = nullptr, *s_clockSec = nullptr;
+static lv_obj_t *s_clockTemp = nullptr, *s_clockCond = nullptr;
+static lv_obj_t *s_clockDay[3] = { nullptr, nullptr, nullptr };
+static lv_obj_t *s_clockDayTemp[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
+static lv_obj_t *s_cardLogo = nullptr, *s_cardAirline = nullptr;
+static lv_obj_t *s_vesselCard = nullptr, *s_vesselTitle = nullptr, *s_vesselBody = nullptr;
+static bool      s_vesselShown = false;
 static lv_obj_t *s_photo = nullptr, *s_photoCredit = nullptr;   // aircraft photo above the card
 static char s_lastRouteReq[12] = "";
 static lv_obj_t *s_hudWifi = nullptr, *s_hudCount = nullptr, *s_hudClock = nullptr, *s_hudBatt = nullptr, *s_hudDate = nullptr;
 static lv_obj_t *s_hudBars[4] = { nullptr, nullptr, nullptr, nullptr };   // WiFi signal-strength bars
-static lv_obj_t *s_list = nullptr;
+static lv_obj_t *s_list = nullptr, *s_listTitle = nullptr;
 static lv_obj_t *s_statsLbl = nullptr;
 static lv_obj_t *s_statsNet = nullptr;
 static lv_obj_t *s_hudGps   = nullptr;   // HUD satellite icon (hidden unless GPS auto-location is on)
@@ -57,6 +76,19 @@ static lv_obj_t *s_fcDayRain[3] = { nullptr, nullptr, nullptr };
 // The feed gives altitude in ft, speed in kt, vertical speed in fpm, distance in km.
 static int s_units = 0;
 void ui_set_units(int u) { s_units = (u < 0 || u > 2) ? 0 : u; }
+
+// ----------------------------------------------------------------- clock format
+static bool s_time24 = false;
+void ui_set_time_24h(bool on) { s_time24 = on; }
+bool ui_time_24h(void) { return s_time24; }
+
+void ui_format_clock(char *buf, size_t n, int hour, int min, bool withSuffix) {
+    if (s_time24) { snprintf(buf, n, "%02d:%02d", hour, min); return; }
+    int h12 = hour % 12;
+    if (h12 == 0) h12 = 12;                    // midnight and noon are both "12"
+    if (withSuffix) snprintf(buf, n, "%d:%02d %s", h12, min, hour < 12 ? "AM" : "PM");
+    else            snprintf(buf, n, "%d:%02d", h12, min);
+}
 
 static void fmt_alt(char *b, size_t n, float ft, bool gnd) {
     if (gnd)            snprintf(b, n, "GND");
@@ -130,6 +162,7 @@ static void fold_ascii(char *s) {
 // ----------------------------------------------------------------- detail card
 static void refresh_card(void) {
     AcInfo in;
+    if (s_vesselCard && !s_vesselShown) lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
     if (!radar::selected(in)) {
         lv_obj_add_flag(s_card, LV_OBJ_FLAG_HIDDEN);
         if (s_photo)       lv_obj_add_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
@@ -137,7 +170,44 @@ static void refresh_card(void) {
         s_lastRouteReq[0] = 0;
         return;
     }
+
+    // operator identity: offline name from the callsign prefix + an on-demand logo
+    char alIata[4] = "", alName[32] = "";
+    const bool haveAirline = airline_lookup(in.call, alIata, sizeof(alIata), alName, sizeof(alName));
+    if (haveAirline && alIata[0]) airline_logo_request(alIata);
+    int lw = 0, lh = 0;
+    const bool haveLogo = haveAirline && alIata[0] && airline_logo_get(alIata, &lw, &lh) && lw > 0 && lh > 0;
+    if (s_cardLogo) {
+        if (haveLogo) {
+            int mw, mh;
+            lv_color_t *lbuf = airline_logo_buffer(&mw, &mh);
+            lv_canvas_set_buffer(s_cardLogo, lbuf, lw, lh, LV_IMG_CF_TRUE_COLOR);
+            lv_obj_set_size(s_cardLogo, lw, lh);
+            lv_obj_align(s_cardLogo, LV_ALIGN_TOP_RIGHT, 0, -2);
+            lv_obj_clear_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_invalidate(s_cardLogo);
+        } else {
+            lv_obj_add_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (s_cardAirline) {
+        // Name is the fallback when no logo loaded, and stays hidden once one does
+        // (the mark already says who it is, and the card row is tight).
+        if (haveAirline && !haveLogo) {
+            char an[36];
+            snprintf(an, sizeof(an), "%s", alName);
+            fold_ascii(an);
+            lv_label_set_text(s_cardAirline, an);
+            lv_obj_clear_flag(s_cardAirline, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_cardAirline, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     lv_obj_clear_flag(s_card, LV_OBJ_FLAG_HIDDEN);
+    if (s_vesselCard) {                     // an aircraft selection replaces the vessel card
+        lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
+        s_vesselShown = false;
+    }
 
     char title[40];
     if (in.type[0]) snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : "-", in.type);
@@ -158,6 +228,13 @@ static void refresh_card(void) {
     snprintf(right, sizeof(right), "V/S  %s\nHDG  %03.0f\nSQK  %s", vsS, in.bearingDeg, sqS);
     lv_label_set_text(s_cardL, left);
     lv_label_set_text(s_cardR, right);
+
+    if (s_cardTrackLbl) {
+        const bool isTracked = s_trackHex[0] && strcmp(s_trackHex, in.hex) == 0;
+        lv_label_set_text(s_cardTrackLbl, isTracked ? "TRACKING" : "TRACK");
+        lv_obj_set_style_text_color(s_cardTrackLbl, isTracked ? UI_INK : UI_GREEN, 0);
+        lv_obj_set_style_border_opa(s_cardTrackBtn, isTracked ? 255 : 120, 0);
+    }
 
     // route (origin -> destination), looked up asynchronously by callsign
     if (in.call[0] && strcmp(in.call, s_lastRouteReq) != 0) {
@@ -209,6 +286,34 @@ static void refresh_card(void) {
     }
 }
 
+// ----------------------------------------------------------------- vessel card
+// AIS contacts get their own compact card: a ship has no altitude, squawk, route or
+// photo, so reusing the aircraft card would leave most of it blank.
+static void show_vessel_card(const VesselInfo &vi) {
+    if (!s_vesselCard) return;
+    char title[28];
+    if (vi.name[0]) snprintf(title, sizeof(title), "%s", vi.name);
+    else            snprintf(title, sizeof(title), "MMSI %lu", (unsigned long)vi.mmsi);
+    fold_ascii(title);
+    lv_label_set_text(s_vesselTitle, title);
+
+    char sog[20], cog[16];
+    if (vi.sogKt == vi.sogKt) {
+        if      (s_units == 1) snprintf(sog, sizeof(sog), "%.1f km/h", vi.sogKt * 1.852f);
+        else if (s_units == 2) snprintf(sog, sizeof(sog), "%.1f mph",  vi.sogKt * 1.15078f);
+        else                   snprintf(sog, sizeof(sog), "%.1f kt",   vi.sogKt);
+    } else snprintf(sog, sizeof(sog), "-");
+    if (vi.cogDeg == vi.cogDeg) snprintf(cog, sizeof(cog), "%03.0f", vi.cogDeg);
+    else                        snprintf(cog, sizeof(cog), "-");
+
+    char body[112];
+    snprintf(body, sizeof(body), "MMSI  %lu\nSOG   %s    COG  %s\nDIST  %.1f %s   BRG  %03.0f",
+             (unsigned long)vi.mmsi, sog, cog, dist_val(vi.distKm), dist_unit(), vi.bearingDeg);
+    lv_label_set_text(s_vesselBody, body);
+    lv_obj_clear_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
+    s_vesselShown = true;
+}
+
 // --------------------------------------------------------------------- input
 static bool s_longPressed = false;
 static int s_rangeIdx = -1;
@@ -243,6 +348,59 @@ void ui_set_range_km(float km) {
     s_rangeIdx = best;
 }
 
+// ------------------------------------------------------------------ pinch zoom
+// Two-finger pinch on the radar continuously scales the display range. While the
+// gesture runs only the visual projection changes (preview cb); the feed re-query +
+// NVS persist (full range cb) happen once, when the last finger lifts.
+#define PINCH_RANGE_MIN_KM   5.0f
+#define PINCH_RANGE_MAX_KM 150.0f
+static void (*s_rangePreviewCb)(float) = nullptr;
+static bool     s_pinchActive = false;
+static float    s_pinchStartDist = 0.0f;
+static float    s_pinchStartRange = 0.0f;
+static float    s_pinchRange = 0.0f;
+static uint32_t s_pinchLastApply = 0;
+static uint32_t s_pinchEndTick = 0;          // suppress the ghost tap right after a pinch
+
+void ui_set_range_preview_cb(void (*cb)(float)) { s_rangePreviewCb = cb; }
+
+void ui_pinch_touch(int nPoints, int x0, int y0, int x1, int y1) {
+    if (nPoints >= 2) {
+        const float dx = (float)(x1 - x0), dy = (float)(y1 - y0);
+        const float dist = sqrtf(dx * dx + dy * dy);
+        if (!s_pinchActive) {
+            if (dist < 30.0f) return;              // ignore degenerate two-point reads
+            s_pinchActive = true;
+            s_pinchStartDist = dist;
+            s_pinchStartRange = s_rangeKm;
+            s_pinchRange = s_rangeKm;
+            return;
+        }
+        if (dist < 20.0f) return;
+        // fingers moving apart = zoom in = smaller range
+        float km = s_pinchStartRange * (s_pinchStartDist / dist);
+        if (km < PINCH_RANGE_MIN_KM) km = PINCH_RANGE_MIN_KM;
+        if (km > PINCH_RANGE_MAX_KM) km = PINCH_RANGE_MAX_KM;
+        const uint32_t now = lv_tick_get();
+        // Each preview re-projects the coastline (a full sweep of the embedded point
+        // set) and rebuilds the flow layer, so keep the cadence modest and ignore
+        // changes too small to see.
+        if (now - s_pinchLastApply < 200) return;
+        if (fabsf(km - s_pinchRange) < s_pinchRange * 0.03f) return;
+        s_pinchLastApply = now;
+        s_pinchRange = km;
+        if (s_rangePreviewCb) s_rangePreviewCb(km);
+    } else if (s_pinchActive) {
+        s_pinchActive = false;
+        s_pinchEndTick = lv_tick_get();
+        // round the committed range to a whole km so labels/NVS stay tidy
+        const float km = floorf(s_pinchRange + 0.5f);
+        // A brief two-finger touch that never scaled anything shouldn't cost an NVS
+        // write and a feed re-query.
+        if (s_rangeCb && fabsf(km - s_pinchStartRange) >= 0.5f) s_rangeCb(km);
+    }
+}
+
 static void radar_press_cb(lv_event_t *e) { (void)e; s_longPressed = false; }
 
 static void radar_longpress_cb(lv_event_t *e) {   // long-press cycles the visual theme
@@ -254,11 +412,28 @@ static void radar_longpress_cb(lv_event_t *e) {   // long-press cycles the visua
 static void radar_clicked_cb(lv_event_t *e) {
     (void)e;
     if (s_longPressed) { s_longPressed = false; return; }   // ignore the click after a long-press
+    if (s_pinchActive || lv_tick_get() - s_pinchEndTick < 400) return;   // pinch, not a tap
     lv_indev_t *indev = lv_indev_get_act();
     if (!indev) return;
     lv_point_t p;
     lv_indev_get_point(indev, &p);
-    radar::select(radar::hitTest(p.x, p.y));   // hit -> select; miss -> clear
+    const int hit = radar::hitTest(p.x, p.y);
+    if (hit >= 0) {                            // aircraft win ties: they are the main event
+        s_vesselShown = false;
+        radar::select(hit);
+        refresh_card();
+        return;
+    }
+    // no aircraft under the finger -> try the AIS contacts
+    VesselInfo vi;
+    if (radar::trafficMode() == radar::TRAFFIC_MARINE && vessel_hit_test(p.x, p.y, 30, &vi)) {
+        radar::select(-1);
+        show_vessel_card(vi);
+        refresh_card();
+        return;
+    }
+    s_vesselShown = false;
+    radar::select(-1);
     refresh_card();
 }
 
@@ -336,9 +511,46 @@ void ui_set_gps(int state, int sats) {
 
 // Rebuild the scrollable contact list. Costly (deletes+recreates LVGL buttons), so we
 // only call it when the list tile is actually visible — not on every 2 s poll.
+static void vessel_list_btn_cb(lv_event_t *e) {
+    lv_obj_t *b = lv_event_get_target(e);
+    const int idx = (int)(intptr_t)lv_obj_get_user_data(b);
+    VesselInfo vi;
+    if (!vessel_visible_info(idx, &vi)) return;
+    show_vessel_card(vi);
+    lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_ON);   // jump back to the scope
+}
+
 static void build_list(void) {
     if (!s_list) return;
     lv_obj_clean(s_list);
+    const bool marine = radar::trafficMode() == radar::TRAFFIC_MARINE;
+    if (s_listTitle) lv_label_set_text(s_listTitle, marine ? "VESSELS" : "AIRCRAFT");
+
+    // The list follows the scope: in marine mode it enumerates ships, not aircraft.
+    if (marine) {
+        const int vn = vessel_visible_count();
+        for (int i = 0; i < vn; ++i) {
+            VesselInfo vi;
+            if (!vessel_visible_info(i, &vi)) continue;
+            char sog[12], txt[64];
+            if (vi.sogKt == vi.sogKt) snprintf(sog, sizeof(sog), "%.0fkt", vi.sogKt);
+            else                      snprintf(sog, sizeof(sog), "-");
+            char nm[22];
+            if (vi.name[0]) snprintf(nm, sizeof(nm), "%s", vi.name);
+            else            snprintf(nm, sizeof(nm), "%lu", (unsigned long)vi.mmsi);
+            fold_ascii(nm);
+            snprintf(txt, sizeof(txt), "%-12.12s %-6s %4.1f %s",
+                     nm, sog, dist_val(vi.distKm), dist_unit());
+            lv_obj_t *b = lv_list_add_btn(s_list, NULL, txt);
+            lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_color(b, lv_color_hex(0x9BE9FF), 0);
+            lv_obj_set_style_text_font(b, &lv_font_montserrat_16, 0);
+            lv_obj_set_user_data(b, (void *)(intptr_t)i);
+            lv_obj_add_event_cb(b, vessel_list_btn_cb, LV_EVENT_CLICKED, NULL);
+        }
+        return;
+    }
+
     const int n = radar::count();
     for (int i = 0; i < n; ++i) {
         AcInfo in;
@@ -371,16 +583,24 @@ static void build_stats(void) {
     }
     char altH[16];
     fmt_alt(altH, sizeof(altH), (highest > -1e8f) ? highest : 0.0f, false);
-    char st[220];
+    const int fires = wildfire_count();
+    const int ships = vessel_count();
+    char extra[64] = "";
+    // Only mention the optional layers once they actually have data, so the panel stays
+    // uncluttered for users who never enable them.
+    if (ships) snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), "\nVessels    %d", ships);
+    if (fires) snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), "\nFires      %d", fires);
+
+    char st[300];
     snprintf(st, sizeof(st),
              "Aircraft   %d\n"
              "Emergency  %d\n"
              "Nearest    %s\n"
              "           %.1f %s\n"
              "Highest    %s\n"
-             "Range      %.0f %s",
+             "Range      %.0f %s%s",
              n, emg, n ? nearestCall : "-", dist_val(n ? nearest : 0.0f), dist_unit(),
-             altH, dist_val(s_rangeKm), dist_unit());
+             altH, dist_val(s_rangeKm), dist_unit(), extra);
     lv_label_set_text(s_statsLbl, st);
 }
 
@@ -478,9 +698,10 @@ static void build_weather(void) {
             snprintf(apt, sizeof(apt), "O  %s   %.0f %s %s", iata, dist_val(d), dist_unit(), cardinal(b));
             lv_label_set_text(s_wxAirport, apt);
         } else lv_label_set_text(s_wxAirport, "RADAR CENTRE");
-        char stamp[6] = "--:--";
+        char stamp[12] = "--:--";
         time_t ft = (time_t)frameTime; struct tm ti;
-        if (frameTime && localtime_r(&ft, &ti)) snprintf(stamp, sizeof(stamp), "%02d:%02d", ti.tm_hour, ti.tm_min);
+        if (frameTime && localtime_r(&ft, &ti))
+            ui_format_clock(stamp, sizeof(stamp), ti.tm_hour, ti.tm_min, true);
         char attr[64];
         snprintf(attr, sizeof(attr), cloudMode ? "SAT %s  |  EUMETSAT" : "RADAR %s  |  RAINVIEWER", stamp);
         lv_label_set_text(s_wxAttrib, attr);
@@ -530,6 +751,192 @@ void ui_set_weather_forecast(bool forecast) {
     build_weather();
 }
 
+// ---------------------------------------------------------------- tracked tile
+// Follows one flight: route, progress along the great circle, ETA and live numbers.
+// Progress uses flown/(flown+remaining) rather than flown/total so a diversion or a
+// non-direct routing still yields a sane bar instead of pinning at 100%.
+static void build_tracked(void) {
+    if (!s_trkTitle) return;
+
+    if (!s_trackHex[0]) {
+        lv_label_set_text(s_trkTitle, "No flight tracked");
+        lv_label_set_text(s_trkRoute, "");
+        lv_label_set_text(s_trkStats, "");
+        lv_label_set_text(s_trkEta, "");
+        lv_label_set_text(s_trkFrom, "");
+        lv_label_set_text(s_trkTo, "");
+        lv_label_set_text(s_trkPct, "");
+        lv_obj_add_flag(s_trkBar, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_trkHint, "Tap an aircraft on the radar,\nthen press TRACK on its card.");
+        return;
+    }
+    lv_obj_clear_flag(s_trkBar, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_trkHint, "");
+
+    AcInfo in;
+    const bool live = radar::infoByHex(s_trackHex, in);
+    char title[40];
+    if (live && in.type[0]) snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : s_trackHex, in.type);
+    else                    snprintf(title, sizeof(title), "%s", s_trackCall[0] ? s_trackCall : s_trackHex);
+    fold_ascii(title);
+    lv_label_set_text(s_trkTitle, title);
+    lv_obj_set_style_text_color(s_trkTitle, (live && in.emergency) ? UI_EMERG : UI_INK, 0);
+
+    const char *call = (live && in.call[0]) ? in.call : s_trackCall;
+    char rfrom[40] = "", rto[40] = "";
+    const bool haveRoute = call[0] && route_get(call, rfrom, sizeof(rfrom), rto, sizeof(rto));
+    if (haveRoute && (rfrom[0] || rto[0])) {
+        char rt[96];
+        snprintf(rt, sizeof(rt), "%s  " LV_SYMBOL_RIGHT "  %s", rfrom[0] ? rfrom : "?", rto[0] ? rto : "?");
+        fold_ascii(rt);
+        lv_label_set_text(s_trkRoute, rt);
+        char f[40], t[40];
+        snprintf(f, sizeof(f), "%s", rfrom[0] ? rfrom : "?");
+        snprintf(t, sizeof(t), "%s", rto[0] ? rto : "?");
+        fold_ascii(f); fold_ascii(t);
+        lv_label_set_text(s_trkFrom, f);
+        lv_label_set_text(s_trkTo, t);
+    } else {
+        lv_label_set_text(s_trkRoute, call[0] ? "Looking up route..." : "Route unavailable");
+        lv_label_set_text(s_trkFrom, "");
+        lv_label_set_text(s_trkTo, "");
+    }
+
+    if (!live) {
+        lv_label_set_text(s_trkStats, "Contact lost\n(out of range or feed gap)");
+        lv_label_set_text(s_trkEta, "");
+        return;
+    }
+
+    char altS[16], spdS[16], vsS[24];
+    fmt_alt(altS, sizeof(altS), in.altFt, in.onGround);
+    fmt_spd(spdS, sizeof(spdS), in.gsKt);
+    fmt_vs(vsS, sizeof(vsS), in.vsFpm);
+    char st[128];
+    snprintf(st, sizeof(st), "ALT  %-10s  SPD %s\nDIST %.1f %s   BRG %03.0f   V/S %s",
+             altS, spdS, dist_val(in.distKm), dist_unit(), in.bearingDeg, vsS);
+    lv_label_set_text(s_trkStats, st);
+
+    // progress + ETA need the route endpoints and the aircraft's live position
+    RouteCoords rc;
+    double aclat = 0, aclon = 0;
+    int pct = -1;
+    double remainKm = 0;
+    if (call[0] && route_get_coords(call, rc) && radar::positionByHex(s_trackHex, &aclat, &aclon)) {
+        const double flown  = geo::haversineKm(rc.fromLat, rc.fromLon, aclat, aclon);
+        remainKm            = geo::haversineKm(aclat, aclon, rc.toLat, rc.toLon);
+        const double denom  = flown + remainKm;
+        if (denom > 1.0) {
+            pct = (int)((flown / denom) * 100.0 + 0.5);
+            if (pct < 0) pct = 0;
+            if (pct > 100) pct = 100;
+        }
+    }
+
+    if (pct >= 0) {
+        lv_bar_set_value(s_trkBar, pct, LV_ANIM_ON);
+        char p[8];
+        snprintf(p, sizeof(p), "%d%%", pct);
+        lv_label_set_text(s_trkPct, p);
+        char eta[64];
+        if (in.gsKt == in.gsKt && in.gsKt > 40.0f) {          // NaN-safe; ignore taxi speeds
+            const double hours = remainKm / (in.gsKt * 1.852);
+            const int mins = (int)(hours * 60.0 + 0.5);
+            if (mins < 60) snprintf(eta, sizeof(eta), "%.0f %s to run  " LV_SYMBOL_BULLET "  ETA %d min",
+                                    dist_val((float)remainKm), dist_unit(), mins);
+            else           snprintf(eta, sizeof(eta), "%.0f %s to run  " LV_SYMBOL_BULLET "  ETA %dh %02dm",
+                                    dist_val((float)remainKm), dist_unit(), mins / 60, mins % 60);
+        } else {
+            snprintf(eta, sizeof(eta), "%.0f %s to run", dist_val((float)remainKm), dist_unit());
+        }
+        lv_label_set_text(s_trkEta, eta);
+    } else {
+        lv_bar_set_value(s_trkBar, 0, LV_ANIM_OFF);
+        lv_label_set_text(s_trkPct, "");
+        lv_label_set_text(s_trkEta, haveRoute ? "No airport coordinates for this route" : "");
+    }
+}
+
+static void track_btn_cb(lv_event_t *) {
+    AcInfo in;
+    if (!radar::selected(in)) return;
+    if (s_trackHex[0] && strcmp(s_trackHex, in.hex) == 0) {   // pressing it again untracks
+        s_trackHex[0] = 0;
+        s_trackCall[0] = 0;
+        radar::setTracked("");
+    } else {
+        snprintf(s_trackHex, sizeof(s_trackHex), "%s", in.hex);
+        snprintf(s_trackCall, sizeof(s_trackCall), "%s", in.call);
+        radar::setTracked(in.hex);
+        if (in.call[0]) route_request(in.call);   // make sure the route is on its way
+    }
+    refresh_card();
+    build_tracked();
+}
+
+// ------------------------------------------------------------------ clock tile
+// Big watch-face view: time + date, current conditions, and a compact 3-day strip.
+// The time/date refresh runs on its own 1 s LVGL timer; the weather part is rebuilt
+// with the other tiles whenever data arrives or the tile slides into view.
+static void build_clock_weather(void) {
+    if (!s_clockTemp) return;
+    WeatherSnapshot w;
+    if (!weather_get(w)) {
+        lv_label_set_text(s_clockTemp, "");
+        lv_label_set_text(s_clockCond, "");
+        for (int i = 0; i < 3; ++i) {
+            lv_label_set_text(s_clockDay[i], "");
+            lv_label_set_text(s_clockDayTemp[i], "");
+        }
+        return;
+    }
+    char t[24];
+    snprintf(t, sizeof(t), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
+    lv_label_set_text(s_clockTemp, t);
+    lv_label_set_text(s_clockCond, weather_condition(w.code));
+    for (int col = 0; col < 3; ++col) {
+        const int i = col + 1;
+        if (i < w.dayCount) {
+            lv_label_set_text(s_clockDay[col], weather_day_name(w.days[i].date));
+            char d[24];
+            snprintf(d, sizeof(d), "%.0f/%.0f", weather_temp(w.days[i].tempMaxC),
+                     weather_temp(w.days[i].tempMinC));
+            lv_label_set_text(s_clockDayTemp[col], d);
+        } else {
+            lv_label_set_text(s_clockDay[col], "");
+            lv_label_set_text(s_clockDayTemp[col], "");
+        }
+    }
+}
+
+static void clock_tick_cb(lv_timer_t *) {
+    if (!s_clockTime || !s_tv) return;
+    if (lv_tileview_get_tile_act(s_tv) != s_tileClock) return;   // only pay when visible
+    const time_t now = time(nullptr);
+    struct tm ti;
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+    localtime_r(&now, &ti);
+#else
+    ti = *localtime(&now);
+#endif
+    if (now < 1000000000) {                        // clock not set yet (no RTC/NTP)
+        lv_label_set_text(s_clockTime, "--:--");
+        lv_label_set_text(s_clockSec, "");
+        lv_label_set_text(s_clockDate, "");
+        return;
+    }
+    char hm[12], sec[8], date[32];
+    ui_format_clock(hm, sizeof(hm), ti.tm_hour, ti.tm_min, false);
+    // In 12-hour mode the AM/PM rides in the small label next to the seconds, so the
+    // big digits stay the same width whichever format is selected.
+    if (s_time24) snprintf(sec, sizeof(sec), "%02d", ti.tm_sec);
+    else          snprintf(sec, sizeof(sec), "%02d %s", ti.tm_sec, ti.tm_hour < 12 ? "AM" : "PM");
+    strftime(date, sizeof(date), "%A  %d %b %Y", &ti);
+    lv_label_set_text(s_clockTime, hm);
+    lv_label_set_text(s_clockSec, sec);
+    lv_label_set_text(s_clockDate, date);
+}
+
 // Rebuild whichever of list/stats is currently on screen (called on poll and on swipe).
 static void refresh_active_tile(void) {
     if (!s_tv) return;
@@ -537,13 +944,16 @@ static void refresh_active_tile(void) {
     if (act == s_tileList)  build_list();
     else if (act == s_tileStats) build_stats();
     else if (act == s_tileWeather) build_weather();
+    else if (act == s_tileClock) build_clock_weather();
+    else if (act == s_tileTracked) build_tracked();
 }
 
 void ui_on_data_updated(void) {
     refresh_card();
     if (s_hudCount) {
+        const bool marine = radar::trafficMode() == radar::TRAFFIC_MARINE;
         char cbuf[8];
-        snprintf(cbuf, sizeof(cbuf), "%d", radar::countInRange());
+        snprintf(cbuf, sizeof(cbuf), "%d", marine ? vessel_visible_count() : radar::countInRange());
         lv_label_set_text(s_hudCount, cbuf);
     }
     refresh_active_tile();   // only the visible tile pays the rebuild cost
@@ -612,6 +1022,37 @@ static void build_card(void) {
     lv_obj_set_style_text_color(s_cardRoute, UI_GREEN, 0);
     lv_obj_align(s_cardRoute, LV_ALIGN_TOP_LEFT, 0, 76);
 
+    // operator: logo when one downloads, otherwise the airline name. Same corner —
+    // they are mutually exclusive, so the title row never gets crowded.
+    s_cardLogo = lv_canvas_create(s_card);
+    lv_obj_set_style_radius(s_cardLogo, 3, 0);
+    lv_obj_set_style_clip_corner(s_cardLogo, true, 0);
+    lv_obj_add_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
+
+    s_cardAirline = lv_label_create(s_card);
+    lv_obj_set_style_text_font(s_cardAirline, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_cardAirline, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_cardAirline, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_text(s_cardAirline, "");
+    lv_obj_align(s_cardAirline, LV_ALIGN_TOP_RIGHT, 0, 2);
+    lv_obj_add_flag(s_cardAirline, LV_OBJ_FLAG_HIDDEN);
+
+    // TRACK toggle: pins this contact to the tracked view (progress bar + ETA)
+    s_cardTrackBtn = lv_btn_create(s_card);
+    lv_obj_set_size(s_cardTrackBtn, 84, 26);
+    lv_obj_align(s_cardTrackBtn, LV_ALIGN_BOTTOM_RIGHT, 0, 2);
+    lv_obj_set_style_radius(s_cardTrackBtn, 13, 0);
+    lv_obj_set_style_bg_color(s_cardTrackBtn, UI_PANEL, 0);
+    lv_obj_set_style_border_color(s_cardTrackBtn, UI_GREEN, 0);
+    lv_obj_set_style_border_width(s_cardTrackBtn, 1, 0);
+    lv_obj_clear_flag(s_cardTrackBtn, LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_event_cb(s_cardTrackBtn, track_btn_cb, LV_EVENT_CLICKED, nullptr);
+    s_cardTrackLbl = lv_label_create(s_cardTrackBtn);
+    lv_obj_set_style_text_font(s_cardTrackLbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_cardTrackLbl, UI_GREEN, 0);
+    lv_label_set_text(s_cardTrackLbl, "TRACK");
+    lv_obj_center(s_cardTrackLbl);
+
     // aircraft photo + credit, floating above the card (hidden until one loads)
     s_photo = lv_canvas_create(s_tileRadar);
     lv_obj_set_style_radius(s_photo, 6, 0);
@@ -626,10 +1067,38 @@ static void build_card(void) {
     lv_obj_set_style_text_color(s_photoCredit, UI_DIM, 0);
     lv_label_set_text(s_photoCredit, "");
     lv_obj_add_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
+
+    // --- AIS vessel card (compact; shares the aircraft card's slot) ---
+    s_vesselCard = lv_obj_create(s_tileRadar);
+    lv_obj_remove_style_all(s_vesselCard);
+    lv_obj_set_size(s_vesselCard, 300, 96);
+    lv_obj_align(s_vesselCard, LV_ALIGN_CENTER, 0, 76);
+    lv_obj_set_style_bg_color(s_vesselCard, UI_PANEL, 0);
+    lv_obj_set_style_bg_opa(s_vesselCard, 235, 0);
+    lv_obj_set_style_radius(s_vesselCard, 14, 0);
+    lv_obj_set_style_border_color(s_vesselCard, lv_color_hex(0x35D6FF), 0);
+    lv_obj_set_style_border_opa(s_vesselCard, 120, 0);
+    lv_obj_set_style_border_width(s_vesselCard, 1, 0);
+    lv_obj_set_style_pad_all(s_vesselCard, 12, 0);
+    lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_CLICKABLE);   // consume taps (don't deselect)
+    lv_obj_clear_flag(s_vesselCard, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
+
+    s_vesselTitle = lv_label_create(s_vesselCard);
+    lv_obj_set_style_text_font(s_vesselTitle, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_vesselTitle, lv_color_hex(0x9BE9FF), 0);
+    lv_label_set_text(s_vesselTitle, "");
+    lv_obj_align(s_vesselTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    s_vesselBody = lv_label_create(s_vesselCard);
+    lv_obj_set_style_text_font(s_vesselBody, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_vesselBody, UI_SOFT, 0);
+    lv_label_set_text(s_vesselBody, "");
+    lv_obj_align(s_vesselBody, LV_ALIGN_TOP_LEFT, 0, 24);
 }
 
 void ui_show_view(int idx) {
-    if (s_tv && idx >= 0 && idx <= 3) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
+    if (s_tv && idx >= 0 && idx <= 5) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
 }
 
 // ------------------------------------------------------------------- splash
@@ -710,7 +1179,9 @@ void ui_create(void) {
     s_tileRadar = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
     s_tileList  = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
     s_tileStats = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
-    s_tileWeather = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_LEFT);
+    s_tileWeather = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
+    s_tileTracked = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);
+    s_tileClock = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) { refresh_active_tile(); }, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -795,7 +1266,7 @@ void ui_create(void) {
 
     // --- list tile (circular panel, clipped to the round screen) ---
     lv_obj_t *lp = make_round_panel(s_tileList);
-    make_tile_title(lp, "AIRCRAFT");
+    s_listTitle = make_tile_title(lp, "AIRCRAFT");
     s_list = lv_list_create(lp);
     lv_obj_set_size(s_list, 300, 372);
     lv_obj_align(s_list, LV_ALIGN_CENTER, 0, 22);
@@ -1030,6 +1501,129 @@ void ui_create(void) {
     lv_obj_set_style_text_color(s_weatherModeLbl, UI_GREEN, 0);
     lv_label_set_text(s_weatherModeLbl, "3-DAY FORECAST");
     lv_obj_center(s_weatherModeLbl);
+
+    // --- tracked tile (one flight: route, progress, ETA, live numbers) ---
+    lv_obj_t *tp = make_round_panel(s_tileTracked);
+    make_tile_title(tp, "TRACKED");
+
+    s_trkTitle = lv_label_create(tp);
+    lv_obj_set_width(s_trkTitle, 330);
+    lv_obj_set_style_text_font(s_trkTitle, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(s_trkTitle, UI_INK, 0);
+    lv_obj_set_style_text_align(s_trkTitle, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_trkTitle, "No flight tracked");
+    lv_obj_align(s_trkTitle, LV_ALIGN_TOP_MID, 0, 74);
+
+    s_trkRoute = lv_label_create(tp);
+    lv_obj_set_width(s_trkRoute, 350);
+    lv_obj_set_style_text_font(s_trkRoute, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_trkRoute, UI_GREEN, 0);
+    lv_obj_set_style_text_align(s_trkRoute, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_trkRoute, "");
+    lv_obj_align(s_trkRoute, LV_ALIGN_TOP_MID, 0, 116);
+
+    s_trkBar = lv_bar_create(tp);
+    lv_obj_set_size(s_trkBar, 300, 10);
+    lv_obj_align(s_trkBar, LV_ALIGN_CENTER, 0, -6);
+    lv_obj_set_style_radius(s_trkBar, 5, 0);
+    lv_obj_set_style_bg_color(s_trkBar, lv_color_hex(0x14301F), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_trkBar, UI_GREEN, LV_PART_INDICATOR);
+    lv_bar_set_range(s_trkBar, 0, 100);
+    lv_bar_set_value(s_trkBar, 0, LV_ANIM_OFF);
+    lv_obj_add_flag(s_trkBar, LV_OBJ_FLAG_HIDDEN);
+
+    s_trkFrom = lv_label_create(tp);
+    lv_obj_set_style_text_font(s_trkFrom, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_trkFrom, UI_SOFT, 0);
+    lv_label_set_text(s_trkFrom, "");
+    lv_obj_align(s_trkFrom, LV_ALIGN_CENTER, -150, 12);
+
+    s_trkTo = lv_label_create(tp);
+    lv_obj_set_style_text_font(s_trkTo, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_trkTo, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_trkTo, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_text(s_trkTo, "");
+    lv_obj_align(s_trkTo, LV_ALIGN_CENTER, 150, 12);
+
+    s_trkPct = lv_label_create(tp);
+    lv_obj_set_style_text_font(s_trkPct, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_trkPct, UI_INK, 0);
+    lv_label_set_text(s_trkPct, "");
+    lv_obj_align(s_trkPct, LV_ALIGN_CENTER, 0, 12);
+
+    s_trkEta = lv_label_create(tp);
+    lv_obj_set_width(s_trkEta, 340);
+    lv_obj_set_style_text_font(s_trkEta, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_trkEta, UI_INK, 0);
+    lv_obj_set_style_text_align(s_trkEta, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_trkEta, "");
+    lv_obj_align(s_trkEta, LV_ALIGN_CENTER, 0, 44);
+
+    s_trkStats = lv_label_create(tp);
+    lv_obj_set_width(s_trkStats, 340);
+    lv_obj_set_style_text_font(s_trkStats, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_trkStats, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_trkStats, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_trkStats, "");
+    lv_obj_align(s_trkStats, LV_ALIGN_CENTER, 0, 84);
+
+    s_trkHint = lv_label_create(tp);
+    lv_obj_set_width(s_trkHint, 320);
+    lv_obj_set_style_text_font(s_trkHint, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_trkHint, UI_DIM, 0);
+    lv_obj_set_style_text_align(s_trkHint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_trkHint, "Tap an aircraft on the radar,\nthen press TRACK on its card.");
+    lv_obj_align(s_trkHint, LV_ALIGN_CENTER, 0, 20);
+
+    // --- clock tile (watch face + current weather + 3-day strip) ---
+    lv_obj_t *cp = make_round_panel(s_tileClock);
+    lv_obj_set_style_bg_color(cp, lv_color_black(), 0);   // true black: kind to the AMOLED at night
+    make_tile_title(cp, "CLOCK");
+
+    s_clockTime = lv_label_create(cp);
+    lv_obj_set_style_text_font(s_clockTime, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(s_clockTime, UI_INK, 0);
+    lv_label_set_text(s_clockTime, "--:--");
+    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, -10, -70);
+
+    s_clockSec = lv_label_create(cp);
+    lv_obj_set_style_text_font(s_clockSec, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_clockSec, UI_GREEN, 0);
+    lv_label_set_text(s_clockSec, "");
+    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, 84, -58);
+
+    s_clockDate = lv_label_create(cp);
+    lv_obj_set_style_text_font(s_clockDate, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_clockDate, UI_SOFT, 0);
+    lv_label_set_text(s_clockDate, "");
+    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, 0, -20);
+
+    s_clockTemp = lv_label_create(cp);
+    lv_obj_set_style_text_font(s_clockTemp, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(s_clockTemp, UI_INK, 0);
+    lv_label_set_text(s_clockTemp, "");
+    lv_obj_align(s_clockTemp, LV_ALIGN_CENTER, 0, 26);
+
+    s_clockCond = lv_label_create(cp);
+    lv_obj_set_style_text_font(s_clockCond, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_clockCond, UI_SOFT, 0);
+    lv_label_set_text(s_clockCond, "");
+    lv_obj_align(s_clockCond, LV_ALIGN_CENTER, 0, 56);
+
+    const int clkColX[3] = { -110, 0, 110 };
+    for (int i = 0; i < 3; ++i) {
+        s_clockDay[i] = lv_label_create(cp);
+        lv_obj_set_style_text_font(s_clockDay[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(s_clockDay[i], UI_GREEN, 0);
+        lv_label_set_text(s_clockDay[i], "");
+        lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], 96);
+        s_clockDayTemp[i] = lv_label_create(cp);
+        lv_obj_set_style_text_font(s_clockDayTemp[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(s_clockDayTemp[i], UI_SOFT, 0);
+        lv_label_set_text(s_clockDayTemp[i], "");
+        lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], 118);
+    }
+    lv_timer_create(clock_tick_cb, 1000, nullptr);
 
     lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);
 

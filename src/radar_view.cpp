@@ -8,6 +8,10 @@
 #include "geo.h"
 #include "coastline.h"
 #include "airports.h"
+#include "wildfire.h"
+#include "map_bg.h"
+#include "vessel.h"
+#include "aircraft_types.h"
 #include <lvgl.h>
 #include <math.h>
 #include <stdio.h>
@@ -48,6 +52,11 @@
 #define ORB_FLOW   lv_color_hex(0xFFC24D)
 
 // ---- sweep config ----
+// These are the original values. A shorter trail and a lower frame rate measured faster
+// (9 -> 16 fps) but looked WORSE on the actual panel: the long fading trail visually
+// masks the angular stepping, so shortening it exposed the very judder it was meant to
+// cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
+// Do not "optimise" these without looking at the screen.
 #define SWEEP_PERIOD_MS   8000
 #define SWEEP_FRAME_MS    30
 #define SWEEP_TRAIL_DEG   38.0f
@@ -70,6 +79,7 @@ static void      (*s_themeCb)(int) = nullptr;
 // scope "chrome" palette (rings/sweep/crosshair/labels) — retinted per theme
 static lv_color_t s_cRing = COL_GREEN, s_cLead = COL_LEAD, s_cInk = COL_INK, s_cSoft = COL_SOFT;
 static lv_obj_t  *s_parent   = nullptr;
+static lv_obj_t  *s_mapCanvas = nullptr;   // basemap image, below every other layer
 static lv_obj_t  *s_gridLayer = nullptr;
 static lv_obj_t  *s_sweep     = nullptr;
 static lv_obj_t  *s_acLayer   = nullptr;
@@ -82,6 +92,9 @@ static lv_obj_t  *s_rangeLbl  = nullptr;
 static bool       s_rangeLblVisible = true;
 static bool       s_sweepEnabled    = true;
 static bool       s_airportsEnabled = true;
+static bool       s_firesEnabled    = true;
+static int        s_trafficMode     = radar::TRAFFIC_AIR;
+static bool       s_typeIcons       = true;   // per-type silhouettes vs the plain dart
 static int        s_maxOnScreen     = 20;          // how many (nearest) aircraft to draw (web-configurable)
 static int        s_trailMax        = TRAIL_MAX;   // per-aircraft trail length (0 = off)
 static int        s_flowMax         = FLOW_MAX;    // persistent flow-layer segments, count cap (0 = off)
@@ -116,14 +129,116 @@ struct AcDraw {
     float      altFt;
     bool       onGround;
     float      vsFpm, gsKt, distKm, bearingDeg;
+    double     lat, lon;       // live position (tracked mode: progress along the route)
+    uint8_t    cat;            // AcCategory — which silhouette to draw
     int        squawk;
     std::vector<lv_point_t> trail;
 };
 static std::vector<AcDraw> s_acs;
 static std::map<std::string, std::vector<lv_point_t>> s_trails;
+static std::string s_trackHex;     // pinned contact (tracked view); survives the on-screen cap
 
 static const float GX[4] = { 0.0f,  7.0f, 0.0f, -7.0f };
 static const float GY[4] = { -11.0f, 5.0f, 8.0f, 5.0f };
+
+// ---- type silhouettes -------------------------------------------------------
+// Local coordinates with the nose pointing up (-Y), rotated by track when drawn.
+//
+// Each aircraft is assembled from a few CONVEX polygons — fuselage, wings, tailplane —
+// rather than one outline. Two reasons: a real swept wing spanning both sides is deeply
+// concave, and LVGL's polygon mask is only dependable for convex shapes; and separate
+// parts let the wing carry the category (swept / straight / long / delta) while the
+// fuselage stays a recognisable aeroplane body. An earlier attempt used a single
+// 4-point dart per category, which just produced the same triangle at three sizes.
+struct AcPoly { const float *x, *y; uint8_t n; };
+struct AcShape {
+    AcPoly  parts[4];
+    uint8_t nParts;
+    uint8_t rotorR;    // helicopter rotor disc radius (0 = not a helicopter)
+};
+
+// --- narrowbody airliner: pointed fuselage, swept wings, tailplane ---
+static const float NB_BX[6] = { 0.0f,  1.8f, 1.8f,  0.0f, -1.8f, -1.8f };
+static const float NB_BY[6] = { -13.0f, -9.0f, 8.0f, 11.0f, 8.0f, -9.0f };
+static const float NB_WRX[4] = { 1.5f, 10.0f, 10.0f, 1.5f };
+static const float NB_WRY[4] = { -4.0f, 4.0f,  6.2f, 0.5f };
+static const float NB_WLX[4] = { -1.5f, -10.0f, -10.0f, -1.5f };
+static const float NB_WLY[4] = { -4.0f,  4.0f,   6.2f,  0.5f };
+static const float NB_TX[4] = { 4.2f, 4.2f, -4.2f, -4.2f };
+static const float NB_TY[4] = { 7.5f, 9.6f,  9.6f,  7.5f };
+
+// --- widebody: same anatomy, noticeably larger ---
+static const float WB_BX[6] = { 0.0f,  2.3f, 2.3f,  0.0f, -2.3f, -2.3f };
+static const float WB_BY[6] = { -17.0f, -12.0f, 10.0f, 14.0f, 10.0f, -12.0f };
+static const float WB_WRX[4] = { 2.0f, 13.0f, 13.0f, 2.0f };
+static const float WB_WRY[4] = { -5.0f, 5.0f,  7.8f, 1.0f };
+static const float WB_WLX[4] = { -2.0f, -13.0f, -13.0f, -2.0f };
+static const float WB_WLY[4] = { -5.0f,  5.0f,   7.8f,  1.0f };
+static const float WB_TX[4] = { 5.5f, 5.5f, -5.5f, -5.5f };
+static const float WB_TY[4] = { 10.0f, 12.6f, 12.6f, 10.0f };
+
+// --- regional / business jet: compact ---
+static const float SJ_BX[6] = { 0.0f,  1.3f, 1.3f, 0.0f, -1.3f, -1.3f };
+static const float SJ_BY[6] = { -9.5f, -6.5f, 6.0f, 8.0f, 6.0f, -6.5f };
+static const float SJ_WRX[4] = { 1.1f, 7.0f, 7.0f, 1.1f };
+static const float SJ_WRY[4] = { -3.0f, 3.0f, 4.6f, 0.4f };
+static const float SJ_WLX[4] = { -1.1f, -7.0f, -7.0f, -1.1f };
+static const float SJ_WLY[4] = { -3.0f,  3.0f,  4.6f,  0.4f };
+static const float SJ_TX[4] = { 3.0f, 3.0f, -3.0f, -3.0f };
+static const float SJ_TY[4] = { 5.5f, 7.0f,  7.0f,  5.5f };
+
+// --- turboprop: straight, high-mounted wing well forward ---
+static const float TP_BX[6] = { 0.0f,  1.7f, 1.7f, 0.0f, -1.7f, -1.7f };
+static const float TP_BY[6] = { -11.0f, -7.5f, 8.0f, 10.0f, 8.0f, -7.5f };
+static const float TP_WX[4] = { 11.0f, 11.0f, -11.0f, -11.0f };
+static const float TP_WY[4] = { -5.0f, -2.0f,  -2.0f,  -5.0f };
+static const float TP_TX[4] = { 4.5f, 4.5f, -4.5f, -4.5f };
+static const float TP_TY[4] = { 7.0f, 9.0f,  9.0f,  7.0f };
+
+// --- light aircraft: small, straight wing ---
+static const float LT_BX[6] = { 0.0f, 1.3f, 1.3f, 0.0f, -1.3f, -1.3f };
+static const float LT_BY[6] = { -8.0f, -5.5f, 5.5f, 7.5f, 5.5f, -5.5f };
+static const float LT_WX[4] = { 8.0f, 8.0f, -8.0f, -8.0f };
+static const float LT_WY[4] = { -3.5f, -1.0f, -1.0f, -3.5f };
+static const float LT_TX[4] = { 3.2f, 3.2f, -3.2f, -3.2f };
+static const float LT_TY[4] = { 5.0f, 6.8f,  6.8f,  5.0f };
+
+// --- glider: the wing is the whole identity ---
+static const float GL_BX[6] = { 0.0f, 1.0f, 1.0f, 0.0f, -1.0f, -1.0f };
+static const float GL_BY[6] = { -7.0f, -4.5f, 7.0f, 9.0f, 7.0f, -4.5f };
+static const float GL_WX[4] = { 14.0f, 14.0f, -14.0f, -14.0f };
+static const float GL_WY[4] = { -2.5f, -0.8f,  -0.8f,  -2.5f };
+static const float GL_TX[4] = { 3.0f, 3.0f, -3.0f, -3.0f };
+static const float GL_TY[4] = { 6.5f, 7.8f,  7.8f,  6.5f };
+
+// --- fighter: slim body with delta half-wings ---
+static const float FT_BX[6] = { 0.0f, 1.9f, 1.9f, 0.0f, -1.9f, -1.9f };
+static const float FT_BY[6] = { -13.0f, -7.0f, 5.0f, 7.5f, 5.0f, -7.0f };
+static const float FT_WRX[3] = { 1.7f, 7.8f, 1.7f };
+static const float FT_WRY[3] = { -2.5f, 7.0f, 7.0f };
+static const float FT_WLX[3] = { -1.7f, -7.8f, -1.7f };
+static const float FT_WLY[3] = { -2.5f,  7.0f,  7.0f };
+static const float FT_TX[4] = { 3.4f, 3.4f, -3.4f, -3.4f };
+static const float FT_TY[4] = { 6.2f, 8.4f,  8.4f,  6.2f };
+
+// --- helicopter: pod + tail boom + tail rotor, under a rotor disc ---
+static const float HE_BX[6] = { 0.0f, 3.0f, 3.0f, 0.0f, -3.0f, -3.0f };
+static const float HE_BY[6] = { -5.5f, -2.5f, 3.0f, 5.0f, 3.0f, -2.5f };
+static const float HE_MX[4] = { 1.1f, 1.1f, -1.1f, -1.1f };
+static const float HE_MY[4] = { 4.0f, 11.0f, 11.0f, 4.0f };
+static const float HE_TX[4] = { 2.6f, 2.6f, -2.6f, -2.6f };
+static const float HE_TY[4] = { 10.0f, 11.6f, 11.6f, 10.0f };
+
+static const AcShape AC_SHAPES[AC_CAT_COUNT] = {
+    /* NARROW    */ { { {NB_BX,NB_BY,6}, {NB_WRX,NB_WRY,4}, {NB_WLX,NB_WLY,4}, {NB_TX,NB_TY,4} }, 4, 0 },
+    /* WIDE      */ { { {WB_BX,WB_BY,6}, {WB_WRX,WB_WRY,4}, {WB_WLX,WB_WLY,4}, {WB_TX,WB_TY,4} }, 4, 0 },
+    /* SMALLJET  */ { { {SJ_BX,SJ_BY,6}, {SJ_WRX,SJ_WRY,4}, {SJ_WLX,SJ_WLY,4}, {SJ_TX,SJ_TY,4} }, 4, 0 },
+    /* TURBOPROP */ { { {TP_BX,TP_BY,6}, {TP_WX,TP_WY,4},   {TP_TX,TP_TY,4} },                     3, 0 },
+    /* LIGHT     */ { { {LT_BX,LT_BY,6}, {LT_WX,LT_WY,4},   {LT_TX,LT_TY,4} },                     3, 0 },
+    /* HELI      */ { { {HE_BX,HE_BY,6}, {HE_MX,HE_MY,4},   {HE_TX,HE_TY,4} },                     3, 11 },
+    /* FIGHTER   */ { { {FT_BX,FT_BY,6}, {FT_WRX,FT_WRY,3}, {FT_WLX,FT_WLY,3}, {FT_TX,FT_TY,4} }, 4, 0 },
+    /* GLIDER    */ { { {GL_BX,GL_BY,6}, {GL_WX,GL_WY,4},   {GL_TX,GL_TY,4} },                     3, 0 },
+};
 
 static inline bool orb() { return s_theme == THEME_ORB; }
 
@@ -211,6 +326,7 @@ static void grid_draw_cb(lv_event_t *e) {
         td.border_opa = 160;
         coastline_draw(d, COAST_COLOR, 170, 2);    // landmass outline under the triangle
         if (s_airportsEnabled) airports_draw(d, AIRPORT_COLOR, 150);
+        if (s_firesEnabled) wildfire_draw(d, 220);
         lv_draw_polygon(d, &td, tri, 3);
         return;
     }
@@ -219,6 +335,7 @@ static void grid_draw_cb(lv_event_t *e) {
     // Steel blue + 2 px so it reads as a map outline, distinct from the green altitude trails.
     coastline_draw(d, COAST_COLOR, 165, 2);
     if (s_airportsEnabled) airports_draw(d, AIRPORT_COLOR, 150);
+    if (s_firesEnabled) wildfire_draw(d, 220);
 
     // phosphor: concentric rings + crosshair
     lv_draw_arc_dsc_t ad;
@@ -299,6 +416,9 @@ static inline void area_union(lv_area_t &d, const lv_area_t &s) {
     d.x1 = LV_MIN(d.x1, s.x1); d.y1 = LV_MIN(d.y1, s.y1);
     d.x2 = LV_MAX(d.x2, s.x2); d.y2 = LV_MAX(d.y2, s.y2);
 }
+static inline bool area_overlaps(const lv_area_t &a, const lv_area_t &b) {
+    return !(a.x2 < b.x1 || a.x1 > b.x2 || a.y2 < b.y1 || a.y1 > b.y2);
+}
 
 // Advance each glyph from its previous position toward the new target (ease-out),
 // invalidating only the small region each one occupies. Self-limiting: when a plane
@@ -344,6 +464,10 @@ static void sweep_timer_cb(lv_timer_t *t) {
     }
     if (!s_sweepEnabled) return;          // sweep disabled: glyph interpolation above still runs
     s_prevSweepDeg = s_sweepDeg;
+    // Fixed step per callback. Deriving the angle from the clock instead is "correct"
+    // (constant angular velocity regardless of frame rate) but looked worse here: with
+    // variable frame times it produces variable step sizes, and uneven steps read as
+    // more judder than uniform small ones. Reverted deliberately — see docs/FEATURES.md.
     s_sweepDeg += 360.0f * (float)SWEEP_FRAME_MS / (float)SWEEP_PERIOD_MS;
     if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
     if (!s_sweep) return;
@@ -438,35 +562,85 @@ static void ac_draw_cb(lv_event_t *e) {
     const bool drg = orb();
     int balls = 0, arrows = 0;
 
+    // Marine mode replaces the air picture rather than overlaying it: ships and
+    // aircraft share no scale, altitude or speed frame, so a combined plot reads as
+    // noise. Vessels live on this layer because AIS updates arrive continuously and
+    // this layer is already invalidated every poll.
+    if (s_trafficMode == radar::TRAFFIC_MARINE) {
+        vessel_draw(d, 220);
+        return;
+    }
+
     for (const AcDraw &ac : s_acs) {
+        // Decide eligibility and claim an Orb blip/arrow slot FIRST. This callback runs
+        // once per invalidated region, so the budget must be spent in the same order
+        // every time — clipping before counting would let a different set of aircraft
+        // qualify depending on which region is being repainted, and they would flicker.
+        bool eligible;
+        if (drg) {
+            if (ac.inRange) { eligible = (balls  < ORB_BLIPS);  if (eligible) balls++; }
+            else            { eligible = (arrows < ORB_ARROWS); if (eligible) arrows++; }
+        } else {
+            eligible = ac.inRange;                // phosphor shows in-range traffic only
+        }
+        if (!eligible) continue;
+
+        // Now skip the drawing work for anything outside the region being repainted.
+        // The sweep invalidates a large box every frame; without this, every aircraft
+        // was redrawn for every region even when nowhere near it.
+        if (d->clip_area) {
+            const lv_area_t bb = glyph_bbox(ac.pos);
+            if (!area_overlaps(bb, *d->clip_area)) continue;
+        }
+
         if (drg) {
             if (ac.inRange) {
-                if (balls >= ORB_BLIPS) continue;   // up to 7 in-range balls
                 draw_trail(d, ac, ORB_FLOW);
                 draw_ball(d, ac);
-                balls++;
             } else {
-                if (arrows >= ORB_ARROWS) continue;  // up to 8 off-range arrows
                 draw_offrange(d, ac);
-                arrows++;
             }
         } else {
-            if (!ac.inRange) continue;            // phosphor shows in-range traffic only
             draw_trail(d, ac, ac.color);
             const float th = ((ac.track != ac.track) ? 0.0f : ac.track) * (float)M_PI / 180.0f;
             const float c = cosf(th), s = sinf(th);
-            lv_point_t pts[4];
-            for (int i = 0; i < 4; ++i) {
-                const float x = GX[i] * c - GY[i] * s;
-                const float y = GX[i] * s + GY[i] * c;
-                pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
-                pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
-            }
+
             lv_draw_rect_dsc_t g;
             lv_draw_rect_dsc_init(&g);
             g.bg_color = ac.color;
             g.bg_opa = LV_OPA_COVER;
-            lv_draw_polygon(d, &g, pts, 4);
+
+            if (s_typeIcons) {
+                const AcShape &sh = AC_SHAPES[ac.cat < AC_CAT_COUNT ? ac.cat : AC_CAT_NARROW];
+                lv_point_t pts[8];
+                for (int p = 0; p < sh.nParts; ++p) {
+                    const AcPoly &poly = sh.parts[p];
+                    for (int i = 0; i < poly.n; ++i) {
+                        const float x = poly.x[i] * c - poly.y[i] * s;
+                        const float y = poly.x[i] * s + poly.y[i] * c;
+                        pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
+                        pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
+                    }
+                    lv_draw_polygon(d, &g, pts, poly.n);
+                }
+                if (sh.rotorR) {                       // helicopter: rotor disc over the pod
+                    lv_draw_arc_dsc_t r;
+                    lv_draw_arc_dsc_init(&r);
+                    r.color = ac.color;
+                    r.width = 2;
+                    r.opa = 150;
+                    lv_draw_arc(d, &r, &ac.pos, sh.rotorR, 0, 360);
+                }
+            } else {
+                lv_point_t pts[4];
+                for (int i = 0; i < 4; ++i) {
+                    const float x = GX[i] * c - GY[i] * s;
+                    const float y = GX[i] * s + GY[i] * c;
+                    pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
+                    pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
+                }
+                lv_draw_polygon(d, &g, pts, 4);
+            }
             if (ac.emergency) {
                 lv_draw_arc_dsc_t h;
                 lv_draw_arc_dsc_init(&h);
@@ -604,6 +778,24 @@ void setAirportsEnabled(bool on) {
 }
 bool airportsEnabled() { return s_airportsEnabled; }
 
+void setFiresEnabled(bool on) {
+    s_firesEnabled = on;
+    if (s_gridLayer) lv_obj_invalidate(s_gridLayer);
+}
+bool firesEnabled() { return s_firesEnabled; }
+
+void setTrafficMode(int mode) {
+    s_trafficMode = (mode == TRAFFIC_MARINE) ? TRAFFIC_MARINE : TRAFFIC_AIR;
+    if (s_acLayer) lv_obj_invalidate(s_acLayer);
+}
+int trafficMode() { return s_trafficMode; }
+
+void setTypeIcons(bool on) {
+    s_typeIcons = on;
+    if (s_acLayer) lv_obj_invalidate(s_acLayer);
+}
+bool typeIcons() { return s_typeIcons; }
+
 // 0 = off, 1 = short, 2 = medium (default), 3 = long. Controls both the per-aircraft
 // trail and the persistent flow layer (the long-lived "where everything has been" tracks).
 void setTrailLength(int level) {
@@ -615,6 +807,9 @@ void setTrailLength(int level) {
     }
     if (s_flowMax == 0) { s_flow.clear(); s_trails.clear(); }
     else while ((int)s_flow.size() > s_flowMax) s_flow.pop_front();
+    // With trails off the canvas is fully transparent but LVGL still reads and blends
+    // every pixel of it inside each redrawn region. Hiding it removes that cost entirely.
+    show(s_flowCanvas, s_flowMax > 0);
     flow_redraw_all();                              // repaint the flow canvas at the new length
     if (s_acLayer) lv_obj_invalidate(s_acLayer);
 }
@@ -652,6 +847,14 @@ void init(void *lv_parent) {
         lv_canvas_fill_bg(s_flowCanvas, lv_color_black(), LV_OPA_TRANSP);
     }
     lv_obj_center(s_flowCanvas);
+
+    // Basemap sits at the very bottom: created before the other layers so the flow
+    // canvas, chrome, sweep and glyphs all paint over it.
+    s_mapCanvas = lv_canvas_create(parent);
+    lv_obj_clear_flag(s_mapCanvas, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(s_mapCanvas);
+    lv_obj_add_flag(s_mapCanvas, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_background(s_mapCanvas);
 
     s_gridLayer = make_layer(parent, grid_draw_cb);
     s_sweep     = make_layer(parent, sweep_draw_cb);
@@ -726,6 +929,40 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         }
     }
 
+    // Basemap: show it only while the committed image matches the live scope. After a
+    // zoom the old image is geometrically wrong, so it hides until the rebuild lands.
+    if (s_mapCanvas) {
+        const uint16_t *px = nullptr;
+        double mlat = 0, mlon = 0;
+        float mrange = 0;
+        uint32_t ver = 0;
+        static uint32_t shownVer = 0;
+        const bool have = map_bg_front(&px, &mlat, &mlon, &mrange, &ver) && px;
+        const bool matches = have && fabs(mlat - s.homeLat) < 0.02 &&
+                             fabs(mlon - s.homeLon) < 0.02 &&
+                             fabsf(mrange - s.rangeKm) < 0.5f;
+        if (matches) {
+            if (ver != shownVer) {
+                lv_canvas_set_buffer(s_mapCanvas, (void *)px, MAP_BG_SIZE, MAP_BG_SIZE,
+                                     LV_IMG_CF_TRUE_COLOR);
+                lv_obj_set_size(s_mapCanvas, MAP_BG_SIZE, MAP_BG_SIZE);
+                lv_obj_center(s_mapCanvas);
+                lv_obj_move_background(s_mapCanvas);
+                shownVer = ver;
+                lv_obj_invalidate(s_mapCanvas);
+            }
+            lv_obj_clear_flag(s_mapCanvas, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_mapCanvas, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Fires re-project on their own schedule (new FIRMS data arrives between zooms),
+    // so this is checked every poll rather than only on a geometry change.
+    if (wildfire_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R) && s_gridLayer)
+        lv_obj_invalidate(s_gridLayer);
+    vessel_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R);   // drawn on the aircraft layer
+
     std::map<std::string, lv_point_t> prevPos;        // smooth-motion: glide starts here
     for (const AcDraw &a : s_acs) prevPos[a.hex] = a.pos;
 
@@ -766,6 +1003,9 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         d.gsKt = ac.gs;
         d.distKm = (float)distKm;
         d.bearingDeg = (float)brg;
+        d.lat = ac.lat;
+        d.lon = ac.lon;
+        d.cat = (uint8_t)aircraft_category(ac.type.c_str());
         d.squawk = ac.squawk;
         if (ac.onGround) snprintf(d.altTxt, sizeof(d.altTxt), "GND");
         else             snprintf(d.altTxt, sizeof(d.altTxt), "%.0f ft", (double)ac.altBaro);
@@ -817,7 +1057,16 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
     // nearest first (the blips + the list); cap to keep work bounded (web-configurable)
     std::sort(out.begin(), out.end(),
               [](const AcDraw &a, const AcDraw &b) { return a.distKm < b.distKm; });
-    if ((int)out.size() > s_maxOnScreen) out.resize(s_maxOnScreen);
+    if ((int)out.size() > s_maxOnScreen) {
+        // A tracked flight is usually the one heading away from us, so it would be the
+        // first thing the distance cap drops. Pull it into the kept range instead.
+        if (!s_trackHex.empty()) {
+            for (size_t i = (size_t)s_maxOnScreen; i < out.size(); ++i) {
+                if (s_trackHex == out[i].hex) { std::swap(out[(size_t)s_maxOnScreen - 1], out[i]); break; }
+            }
+        }
+        out.resize(s_maxOnScreen);
+    }
 
     if (++s_flowRedrawCtr >= FLOW_REDRAW_EVERY) {
         s_flowRedrawCtr = 0;
@@ -842,6 +1091,7 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
 }
 
 int hitTest(int x, int y) {
+    if (s_trafficMode == TRAFFIC_MARINE) return -1;   // aircraft aren't on screen to hit
     int best = -1;
     long bestD = (long)TAP_RADIUS_PX * TAP_RADIUS_PX;
     const bool drg = orb();
@@ -895,6 +1145,27 @@ bool info(int idx, AcInfo &out) {
     fill_info(s_acs[idx], out);
     return true;
 }
+
+bool infoByHex(const char *hex, AcInfo &out) {
+    if (!hex || !hex[0]) return false;
+    for (const AcDraw &a : s_acs)
+        if (strcmp(a.hex, hex) == 0) { fill_info(a, out); return true; }
+    return false;
+}
+
+bool positionByHex(const char *hex, double *lat, double *lon) {
+    if (!hex || !hex[0]) return false;
+    for (const AcDraw &a : s_acs)
+        if (strcmp(a.hex, hex) == 0) {
+            if (lat) *lat = a.lat;
+            if (lon) *lon = a.lon;
+            return true;
+        }
+    return false;
+}
+
+void setTracked(const char *hex) { s_trackHex = (hex && hex[0]) ? hex : ""; }
+const char *tracked() { return s_trackHex.c_str(); }
 
 void tickSweep() { /* sweep self-animates via lv_timer */ }
 

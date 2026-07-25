@@ -36,11 +36,105 @@ Visual target: `assets/plane_radar_2.0_mockup.html`.
 | Sat Clouds | Satellite-derived cloud types | ~400 km across | EUMETSAT | 10 min |
 | 3-Day Forecast | Current conditions and daily outlook | Configured/GPS point | Open-Meteo | 30 min |
 
+## Ported from FlightScnr_Pi
+These bring the round-display Raspberry Pi tracker's ideas to the ESP32. Layers that
+need a third-party account are off until a key is entered on the config page.
+
+15. **Pinch zoom** — two-finger pinch on the scope scales the display range continuously
+    (5–150 km) instead of stepping through fixed values. The gesture only re-projects the
+    view; the feed re-query and the NVS write happen once, when the fingers lift. A pinch
+    never registers as a tap or a swipe.
+16. **Map background** — dark or light [CARTO](https://carto.com/attribution/) basemap
+    tiles beneath the scope. The scope is azimuthal-equidistant and tiles are Web
+    Mercator, so the mosaic is resampled per pixel through the inverse scope projection,
+    keeping the map aligned with the range rings at any zoom. Tiles are fetched one per
+    network-task iteration so a 9–16 tile build never stalls the aircraft feed; the old
+    image hides as soon as the scope changes and reappears when the rebuild lands.
+17. **Tracked flight** — TRACK on a detail card pins one contact. The Tracked view shows
+    the route, a progress bar (flown / (flown + remaining), so a diversion still reads
+    sensibly), distance to run and an ETA from ground speed. Endpoint coordinates come
+    from the same adsbdb lookup that supplies the route labels and are cached with it.
+    A pinned contact is exempt from the on-screen aircraft cap.
+18. **Marine AIS** — a persistent [aisstream.io](https://aisstream.io) WebSocket
+    subscribed to a box around the scope. Vessels draw as cyan hulls oriented by course
+    with their names; a tap opens a vessel card (MMSI, SOG, COG, distance, bearing).
+    Contacts expire after 15 minutes without an update. Needs a free API key.
+    The scope plots **either** aircraft **or** vessels, chosen in settings — they share
+    no scale, altitude or speed frame, so overlaying them reads as noise. The HUD count,
+    the list view and tap targets all follow the selected mode.
+19. **Wildfire markers** — NASA FIRMS VIIRS active-fire detections within the scope,
+    sized and coloured by fire radiative power. The CSV header is parsed for column
+    positions rather than assuming a fixed order. Needs a free MAP_KEY.
+20. **Clock view** — a full watch face (time, seconds, weekday and date) with current
+    conditions and a three-day strip. Refreshes on its own 1 s timer, only while visible.
+21. **Quiet hours** — a configurable window (wrapping midnight) that dims, blanks, or
+    forces the clock view. A touch restores normal brightness for 15 seconds.
+22. **Airline identity** — the callsign's ICAO prefix resolves to an operator through an
+    embedded table, so the name shows offline; the logo is downloaded on demand and
+    flattened onto the card colour by the same image proxy the aircraft photos use.
+23. **Type-based aircraft icons** — the feed's ICAO type designator selects a silhouette
+    (`aircraft_types.*`): swept darts in three sizes for small/narrow/wide jets, a
+    straight wing bar for turboprops and light aircraft, a long thin wing for gliders,
+    a delta for fighters, and a rotor disc for helicopters. Shapes are vector polygons
+    rotated by track, not bitmaps, so they cost no flash and stay sharp at any angle.
+    The prefix table is ordered specific-to-general because several families collide
+    (C208 is a turboprop, not a Cessna single; MD5x is a helicopter but MD8x is an
+    airliner; B212 is a Bell helicopter, not a B-2). Unknown types fall back to the
+    narrowbody dart, and the whole feature has an on/off switch.
+24. **12/24-hour clock** — one shared formatter (`ui_format_clock`) drives the HUD, the
+    clock face and the radar/satellite timestamps, so they can never disagree.
+25. **Alert sounds** — five synthesised packs (chime, sonar, marimba, cockpit warning,
+    plain beep) plus a user-uploaded sample. Notes carry a pitch glide, harmonic mix and
+    exponential decay; loudness is equalised across packs by dividing each note by the
+    true peak of its composite waveform (`wave_peak`) rather than by the sum of its
+    harmonic amplitudes, which had made the richer packs up to half as loud.
+    **New contacts and emergencies each pick their own sound**, so a quiet marimba can
+    announce routine traffic while something urgent is reserved for emergencies. The
+    alert mode is a bitmask (bit 0 = new, bit 1 = emergencies), which gives Off / new
+    only / emergencies only / both, and lets the page hide the sound picker for whichever
+    cue is disabled. Old installs are migrated under a new NVS key, since the previous
+    value 2 meant "both" and would read as "emergencies only" as a bitmask.
+26. **WAV upload** (`wav_upload.*`) — the config page accepts a WAV and converts it on
+    the device: an incremental RIFF parser handles chunk boundaries falling anywhere in
+    the stream, stereo is downmixed, any 8-48 kHz rate is linearly resampled to the
+    codec's 16 kHz, and a second pass normalises to 89% full scale with a 10 ms tail
+    fade. The result lands in LittleFS (the 3.5 MB `spiffs` partition) and is reloaded
+    into PSRAM at boot, so a custom sound survives reboots and needs no rebuild.
+    Rejections name the actual problem ("need 16-bit WAV", "compressed WAV",
+    "sample rate must be 8-48 kHz") rather than failing generically.
+
+## Render performance (and one instructive failure)
+The sweep is the most expensive element on screen: every frame redraws a fan of wide
+anti-aliased alpha lines *and* forces every layer beneath it (basemap, flow canvas,
+chrome, coastline, airports) to recomposite over the wedge's bounding box. Measured on
+hardware with 12-15 aircraft in range: ~9 fps with the sweep on, ~35 fps with it off.
+
+Two changes are kept. Both are invisible — they change what is skipped, never what is
+drawn — and together they buy a few fps for free:
+- **Clip rejection** in the aircraft layer, so contacts outside the region being
+  repainted are skipped. Orb's blip/arrow budget is claimed *before* the clip test, or
+  a different set of aircraft would qualify per region and flicker.
+- **The flow canvas is hidden when trails are off.** It is a full-screen alpha layer, so
+  LVGL was reading and blending every pixel of it even when fully transparent — which is
+  why turning trails off previously did not help. Trails off is now worth ~4 fps.
+
+**Two changes were tried and reverted, and the reason matters.** Shortening the sweep
+trail (38 deg -> 16 deg) and driving the sweep angle from the clock instead of a fixed
+step per callback raised the measured frame rate from ~9 to a stable 15-16 fps — and
+looked *worse* on the panel. Two reasons: the long fading trail visually masks angular
+stepping, so shortening it exposed the judder it was hiding; and a time-based angle
+converts variable frame times into variable step sizes, which reads as more judder than
+uniform small steps even though the average speed is correct.
+
+The lesson for anyone tuning this: frame rate is a proxy, not the goal. These particular
+numbers were chosen by eye and should be changed by eye.
+
 ## Nice-to-have / later
-- Route enrichment (origin→destination) via a secondary lookup.
 - Sound themes / mute.
 - Multiple saved home locations.
 - microSD logging of seen aircraft.
+- Local dump1090/readsb as an alternative feed source (FlightScnr_Pi supports this;
+  useful if you run your own receiver).
 
 ## MakerWorld packaging
 - Parametric printable enclosure for the round board (bezel + stand), à la the original radar.

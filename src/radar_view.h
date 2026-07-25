@@ -54,6 +54,8 @@ bool selected(AcInfo& out);                 // false if nothing selected/visible
 int  count();
 int  countInRange();                        // aircraft within the display range (for the HUD)
 bool info(int idx, AcInfo& out);
+bool infoByHex(const char* hex, AcInfo& out);   // tracked mode: follow one contact across polls
+bool positionByHex(const char* hex, double* lat, double* lon);  // live lat/lon of a contact
 
 // Sweep self-animates via an internal timer; kept for API compatibility.
 void tickSweep();
@@ -68,7 +70,18 @@ void setSweepEnabled(bool on);                   // show/hide the rotating sweep
 bool sweepEnabled();
 void setAirportsEnabled(bool on);                // show/hide airport markers on the scope
 bool airportsEnabled();
+void setFiresEnabled(bool on);                   // show/hide FIRMS wildfire markers
+bool firesEnabled();
+// What the scope plots. Aircraft and vessels are different pictures at different
+// scales, so the scope shows one or the other rather than overlaying both.
+enum TrafficMode { TRAFFIC_AIR = 0, TRAFFIC_MARINE = 1 };
+void setTrafficMode(int mode);
+int  trafficMode();
+void setTypeIcons(bool on);                      // per-type silhouettes vs one generic glyph
+bool typeIcons();
 void setTrailLength(int level);                  // 0=off 1=short 2=medium 3=long (aircraft trails + flow)
 void setMaxOnScreen(int n);                       // how many (nearest) aircraft to draw on the scope
+void setTracked(const char* hex);                 // pin a contact so the on-screen cap never drops it
+const char* tracked();                            // "" when nothing is tracked
 
 } // namespace radar
