@@ -1,14 +1,20 @@
 # Capsule Radar 🛩️
 
 <p align="center">
-  <a href="https://socquique.github.io/capsule-radar/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
+  <a href="https://silentwolf75.github.io/capsule-radar/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
   <a href="https://makerworld.com/en/models/2907695-capsule-radar-live-flight-radar-desk-gadget"><img src="https://img.shields.io/badge/MakerWorld-3D%20case-1A8917?logo=bambulab&logoColor=white" alt="MakerWorld – 3D case"></a>
   <img src="https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white" alt="Board: ESP32-S3 round AMOLED">
-  <a href="https://github.com/socquique/capsule-radar/releases"><img src="https://img.shields.io/github/v/tag/socquique/capsule-radar?label=firmware&color=7B42BC" alt="Firmware version"></a>
+  <a href="https://github.com/SilentWolf75/capsule-radar/releases"><img src="https://img.shields.io/github/v/tag/SilentWolf75/capsule-radar?label=firmware&color=7B42BC" alt="Firmware version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/code-MIT-2088FF" alt="License: MIT"></a>
-  <img src="https://img.shields.io/github/languages/count/socquique/capsule-radar?label=languages&color=FFC107" alt="Languages">
-  <a href="https://github.com/socquique/capsule-radar/stargazers"><img src="https://img.shields.io/github/stars/socquique/capsule-radar?style=social" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/github/languages/count/SilentWolf75/capsule-radar?label=languages&color=FFC107" alt="Languages">
+  <a href="https://github.com/SilentWolf75/capsule-radar/stargazers"><img src="https://img.shields.io/github/stars/SilentWolf75/capsule-radar?style=social" alt="GitHub stars"></a>
 </p>
+
+> A fork of [socquique/capsule-radar](https://github.com/socquique/capsule-radar) with features
+> adapted from [yashmulgaonkar/FlightScnr_Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi):
+> per-type aircraft icons, pinch-zoom, a clock view, tracked flights, airline identity,
+> map-tile basemap, wildfire and marine-AIS layers, quiet hours, and configurable alert
+> sounds with WAV upload. See [`docs/FEATURES.md`](docs/FEATURES.md).
 
 <p align="center">
   <img src="docs/img/device.JPG" width="330" alt="Capsule Radar — a live flight on the device">
@@ -67,12 +73,25 @@ On first flash you may need to hold **BOOT** then tap **RESET**. After flashing,
 
 ## Flash from your browser (no toolchain)
 
-Makers can flash without installing anything using **ESP Web Tools** (Chrome or Edge on desktop):
+Flash without installing anything using **ESP Web Tools** (Chrome or Edge on desktop):
 
-1. Open the **[web flasher](https://socquique.github.io/capsule-radar/)** (the project's GitHub Pages site).
+1. Open the **[web flasher](https://silentwolf75.github.io/capsule-radar/)**.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
 
-The flasher is built and published automatically by GitHub Actions ([`.github/workflows/webflasher.yml`](.github/workflows/webflasher.yml)) on every push to `main` — enable it once in **Settings → Pages → Source = GitHub Actions**. Tagged releases (`git tag v1.0.0 && git push origin v1.0.0`) also attach a ready-to-flash `CapsuleRadar-esp32s3.bin` to a **GitHub Release** via [`release.yml`](.github/workflows/release.yml). To preview the flasher locally:
+> ⚠️ **A web flash erases the whole chip**, including your saved WiFi credentials,
+> settings and any alert sound you uploaded. That's what makes it reliable for a first
+> install or a recovery, but it's the wrong tool for a routine update. To keep your
+> settings, update over WiFi instead: open `capsuleradar.local/update` and upload
+> `firmware.bin`, or run `pio run -e esp32-s3-amoled-175-ota -t upload`.
+
+The flasher is built and published automatically by GitHub Actions
+([`.github/workflows/webflasher.yml`](.github/workflows/webflasher.yml)) on every push to
+`main`, and served from GitHub Pages. Each build merges bootloader + partition table +
+application into a single image and stamps it with `FW_VERSION` from
+[`src/config.h`](src/config.h), so the version shown in the browser always matches what
+gets written. Tagged releases (`git tag v1.6.3 && git push origin v1.6.3`) also attach a
+ready-to-flash `CapsuleRadar-esp32s3.bin` to a **GitHub Release** via
+[`release.yml`](.github/workflows/release.yml). To preview the flasher locally:
 
 ```bash
 ./scripts/build_webflasher.sh                      # build + merge into web/flash/
