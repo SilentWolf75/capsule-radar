@@ -40,6 +40,10 @@ static int32_t    s_rotCosQ16 = 65536;       // fixed-point values used in the p
 static int32_t    s_rotSinQ16 = 0;
 static lv_color_t *s_rotBuf = nullptr;       // PSRAM scratch for rotated output (see begin())
 static lv_color_t *s_frameBuf = nullptr;     // full logical framebuffer for arbitrary-angle sampling
+// Screenshots reuse that framebuffer. At cardinal angles it is normally left unwritten
+// (mirroring every flush would cost a memcpy per frame for no benefit), so capture
+// switches the mirror on for exactly one forced full redraw.
+static volatile bool s_capture = false;
 
 static void draw_block(int16_t x, int16_t y, lv_color_t *pixels, uint16_t w, uint16_t h) {
 #if (LV_COLOR_16_SWAP != 0)
@@ -139,7 +143,7 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px) 
     // on every frame for every user; skipping it keeps those paths exactly as before.
     // Switching TO an arbitrary angle invalidates the whole screen (see setRotation),
     // so the framebuffer is fully repopulated before it is ever sampled.
-    if (arbitrary && s_frameBuf) {
+    if ((arbitrary || s_capture) && s_frameBuf) {
         for (int row = 0; row < h; ++row) {
             memcpy(s_frameBuf + (area->y1 + row) * SCREEN_W + area->x1,
                    px + row * w, (size_t)w * sizeof(lv_color_t));
@@ -338,5 +342,19 @@ void setRotation(uint16_t degrees) {
 uint16_t rotation() { return s_rot; }
 
 uint32_t inactiveMs() { return lv_disp_get_inactive_time(NULL); }
+
+// Force one full redraw with the framebuffer mirror on, then hand it back. Returns the
+// logical (unrotated) image, which is what you want for a screenshot regardless of how
+// the physical panel happens to be turned. Call from the LVGL task only — lv_refr_now()
+// renders synchronously, and the web handler runs after lv_timer_handler() has returned.
+const uint16_t *captureFrame() {
+    if (!s_frameBuf) return nullptr;
+    s_capture = true;
+    lv_obj_t *scr = lv_scr_act();
+    if (scr) lv_obj_invalidate(scr);
+    lv_refr_now(NULL);
+    s_capture = false;
+    return (const uint16_t *)s_frameBuf;
+}
 
 } // namespace display

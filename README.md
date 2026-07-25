@@ -16,6 +16,26 @@
 > map-tile basemap, wildfire and marine-AIS layers, quiet hours, and configurable alert
 > sounds with WAV upload. See [`docs/FEATURES.md`](docs/FEATURES.md).
 
+## Screens
+
+Captured from the device itself — these are the real framebuffer, not photographs
+(`python tools/grab_screens.py`, which pulls `/shot.bmp` off the running firmware).
+
+| Radar | Contacts | Stats |
+|:---:|:---:|:---:|
+| <img src="docs/img/screens/radar.png" width="240"> | <img src="docs/img/screens/list.png" width="240"> | <img src="docs/img/screens/stats.png" width="240"> |
+| Aircraft drawn by type, altitude-coloured, with airports labelled by ICAO/IATA ident | Nearest-first contact list | Traffic summary and how to reach the config page |
+
+| Precipitation | Satellite | Forecast |
+|:---:|:---:|:---:|
+| <img src="docs/img/screens/wx-radar.png" width="240"> | <img src="docs/img/screens/wx-cloud.png" width="240"> | <img src="docs/img/screens/forecast.png" width="240"> |
+| RainViewer echoes, aviation-style overlays | EUMETSAT cloud-type imagery | Three days with vector weather icons |
+
+| Tracked flight | Clock |
+|:---:|:---:|
+| <img src="docs/img/screens/tracked.png" width="240"> | <img src="docs/img/screens/clock.png" width="240"> |
+| Follow one aircraft: route progress and ETA | Watch face with a seconds arc and current conditions |
+
 <p align="center">
   <img src="docs/img/device.JPG" width="330" alt="Capsule Radar — a live flight on the device">
 </p>

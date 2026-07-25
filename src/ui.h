@@ -23,3 +23,4 @@ bool ui_time_24h(void);
 void ui_format_clock(char *buf, size_t n, int hour, int min, bool withSuffix);
 void ui_set_large_text(bool on);             // accessibility: bigger fonts everywhere. Call BEFORE ui_create()
 void ui_set_weather_forecast(bool forecast); // false = WX radar, true = 3-day forecast
+void ui_set_weather_mode(int mode);          // 0 = WX radar, 1 = sat clouds, 2 = 3-day forecast

@@ -5,6 +5,7 @@
 #include "route.h"
 #include "photo.h"
 #include "airline.h"
+#include "weather_icons.h"
 #include "vessel.h"
 #include "wildfire.h"
 #include "weather.h"
@@ -37,9 +38,12 @@ static lv_obj_t *s_cardTrackBtn = nullptr, *s_cardTrackLbl = nullptr;
 static char s_trackHex[8] = "";      // tracked contact (empty = nothing tracked)
 static char s_trackCall[12] = "";
 static lv_obj_t *s_clockTime = nullptr, *s_clockDate = nullptr, *s_clockSec = nullptr;
+static lv_obj_t *s_clockArc = nullptr, *s_clockRing = nullptr, *s_clockRule = nullptr;
 static lv_obj_t *s_clockTemp = nullptr, *s_clockCond = nullptr;
 static lv_obj_t *s_clockDay[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_clockDayTemp[3] = { nullptr, nullptr, nullptr };
+static lv_obj_t *s_clockIcon = nullptr, *s_clockDayIcon[3] = { nullptr, nullptr, nullptr };
+static lv_obj_t *s_fcIcon = nullptr, *s_fcDayIcon[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
 static lv_obj_t *s_cardLogo = nullptr, *s_cardAirline = nullptr;
@@ -81,6 +85,21 @@ void ui_set_units(int u) { s_units = (u < 0 || u > 2) ? 0 : u; }
 static bool s_time24 = false;
 void ui_set_time_24h(bool on) { s_time24 = on; }
 bool ui_time_24h(void) { return s_time24; }
+
+// Rough day/night for icon choice: the crescent only appears outside daylight hours.
+// Sunrise/sunset would be better, but the forecast feed doesn't carry them and a weather
+// glyph isn't worth a solar-position calculation.
+static bool is_night(void) {
+    const time_t now = time(nullptr);
+    if (now < 1000000000) return false;      // clock not set yet
+    struct tm ti;
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+    localtime_r(&now, &ti);
+#else
+    ti = *localtime(&now);
+#endif
+    return ti.tm_hour < 6 || ti.tm_hour >= 20;
+}
 
 void ui_format_clock(char *buf, size_t n, int hour, int min, bool withSuffix) {
     if (s_time24) { snprintf(buf, n, "%02d:%02d", hour, min); return; }
@@ -645,13 +664,24 @@ static void build_weather(void) {
         snprintf(current, sizeof(current), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
         lv_label_set_text(s_fcCurrent, current);
         lv_label_set_text(s_fcCondition, weather_condition(w.code));
+        weather_icon_set(s_fcIcon, w.code, is_night());
         lv_label_set_text(s_fcMetricValue[0], current);
         char hum[16]; snprintf(hum, sizeof(hum), "%d%%", w.humidity);
         lv_label_set_text(s_fcMetricValue[1], hum);
         char wind[28]; snprintf(wind, sizeof(wind), "%s %.0f %s", cardinal((float)w.windDeg),
                                 weather_wind(w.windKmh), weather_wind_unit());
         lv_label_set_text(s_fcMetricValue[2], wind);
-        char updated[24]; snprintf(updated, sizeof(updated), "UPDATED %s", w.updated);
+        // The feed hands back "HH:MM" in 24-hour form; re-format it so this line agrees
+        // with the clock preference instead of showing 23:30 next to a 12-hour clock.
+        char stampU[16] = "", updated[28];
+        {
+            int uh = 0, um = 0;
+            if (sscanf(w.updated, "%d:%d", &uh, &um) == 2)
+                ui_format_clock(stampU, sizeof(stampU), uh, um, true);
+            else
+                snprintf(stampU, sizeof(stampU), "%s", w.updated);
+        }
+        snprintf(updated, sizeof(updated), "UPDATED %s", stampU);
         lv_label_set_text(s_fcUpdated, updated);
 
         for (int col = 0; col < 3; ++col) {
@@ -659,6 +689,7 @@ static void build_weather(void) {
             if (i < w.dayCount) {
                 lv_label_set_text(s_fcDay[col], weather_day_name(w.days[i].date));
                 lv_label_set_text(s_fcDayCondition[col], weather_condition(w.days[i].code));
+                weather_icon_set(s_fcDayIcon[col], w.days[i].code, false);
                 char temps[28];
                 snprintf(temps, sizeof(temps), "%.0f / %.0f %s",
                          weather_temp(w.days[i].tempMaxC), weather_temp(w.days[i].tempMinC), weather_temp_unit());
@@ -670,6 +701,7 @@ static void build_weather(void) {
                 lv_label_set_text(s_fcDayCondition[col], "");
                 lv_label_set_text(s_fcDayTemp[col], "");
                 lv_label_set_text(s_fcDayRain[col], "");
+                weather_icon_set(s_fcDayIcon[col], -1, false);
             }
         }
 
@@ -722,6 +754,7 @@ static void build_weather(void) {
     }
 
     lv_obj_t *forecastObjs[] = {
+        s_fcIcon, s_fcDayIcon[0], s_fcDayIcon[1], s_fcDayIcon[2],
         s_fcCurrent, s_fcCondition, s_fcUpdated,
         s_fcMetricName[0], s_fcMetricName[1], s_fcMetricName[2],
         s_fcMetricValue[0], s_fcMetricValue[1], s_fcMetricValue[2],
@@ -757,6 +790,12 @@ static void weather_mode_cb(lv_event_t *) {
 
 void ui_set_weather_forecast(bool forecast) {
     s_weatherMode = forecast ? WEATHER_FORECAST : WEATHER_RADAR;
+    build_weather();
+}
+
+void ui_set_weather_mode(int mode) {
+    if (mode < 0 || mode > 2) return;
+    s_weatherMode = (WeatherViewMode)mode;
     build_weather();
 }
 
@@ -893,9 +932,11 @@ static void build_clock_weather(void) {
     if (!weather_get(w)) {
         lv_label_set_text(s_clockTemp, "");
         lv_label_set_text(s_clockCond, "");
+        weather_icon_set(s_clockIcon, -1, false);
         for (int i = 0; i < 3; ++i) {
             lv_label_set_text(s_clockDay[i], "");
             lv_label_set_text(s_clockDayTemp[i], "");
+            weather_icon_set(s_clockDayIcon[i], -1, false);
         }
         return;
     }
@@ -903,6 +944,7 @@ static void build_clock_weather(void) {
     snprintf(t, sizeof(t), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
     lv_label_set_text(s_clockTemp, t);
     lv_label_set_text(s_clockCond, weather_condition(w.code));
+    weather_icon_set(s_clockIcon, w.code, is_night());
     for (int col = 0; col < 3; ++col) {
         const int i = col + 1;
         if (i < w.dayCount) {
@@ -911,9 +953,11 @@ static void build_clock_weather(void) {
             snprintf(d, sizeof(d), "%.0f/%.0f", weather_temp(w.days[i].tempMaxC),
                      weather_temp(w.days[i].tempMinC));
             lv_label_set_text(s_clockDayTemp[col], d);
+            weather_icon_set(s_clockDayIcon[col], w.days[i].code, false);  // daily = daytime
         } else {
             lv_label_set_text(s_clockDay[col], "");
             lv_label_set_text(s_clockDayTemp[col], "");
+            weather_icon_set(s_clockDayIcon[col], -1, false);
         }
     }
 }
@@ -934,16 +978,15 @@ static void clock_tick_cb(lv_timer_t *) {
         lv_label_set_text(s_clockDate, "");
         return;
     }
-    char hm[12], sec[8], date[32];
+    char hm[12], date[40];
     ui_format_clock(hm, sizeof(hm), ti.tm_hour, ti.tm_min, false);
-    // In 12-hour mode the AM/PM rides in the small label next to the seconds, so the
-    // big digits stay the same width whichever format is selected.
-    if (s_time24) snprintf(sec, sizeof(sec), "%02d", ti.tm_sec);
-    else          snprintf(sec, sizeof(sec), "%02d %s", ti.tm_sec, ti.tm_hour < 12 ? "AM" : "PM");
     strftime(date, sizeof(date), "%A  %d %b %Y", &ti);
     lv_label_set_text(s_clockTime, hm);
-    lv_label_set_text(s_clockSec, sec);
     lv_label_set_text(s_clockDate, date);
+    // Seconds read off the rim arc instead of a number: it echoes the radar sweep and
+    // removes the "25 PM" ambiguity that came from sharing one label with the meridiem.
+    if (s_clockArc) lv_arc_set_value(s_clockArc, ti.tm_sec);
+    lv_label_set_text(s_clockSec, s_time24 ? "" : (ti.tm_hour < 12 ? "AM" : "PM"));
 }
 
 // Rebuild whichever of list/stats is currently on screen (called on poll and on swipe).
@@ -1442,11 +1485,16 @@ void ui_create(void) {
     lv_obj_set_style_radius(s_wxAttrib, 6, 0);
 
     // Forecast mode: independent, aligned objects instead of a tiny text table.
+    s_fcIcon = lv_obj_create(wp);                 // current conditions, beside the temperature
+    weather_icon_attach(s_fcIcon);
+    lv_obj_set_size(s_fcIcon, 58, 58);
+    lv_obj_align(s_fcIcon, LV_ALIGN_TOP_MID, -78, 62);
+
     s_fcCurrent = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCurrent, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_fcCurrent, UI_INK, 0);
     lv_label_set_text(s_fcCurrent, "-- C");
-    lv_obj_align(s_fcCurrent, LV_ALIGN_TOP_MID, 0, 68);
+    lv_obj_align(s_fcCurrent, LV_ALIGN_TOP_MID, 22, 68);
     s_fcCondition = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCondition, F16(), 0);
     lv_obj_set_style_text_color(s_fcCondition, UI_SOFT, 0);
@@ -1471,7 +1519,12 @@ void ui_create(void) {
         lv_obj_set_style_text_font(s_fcDay[i], F16(), 0);
         lv_obj_set_style_text_color(s_fcDay[i], UI_GREEN, 0);
         lv_label_set_text(s_fcDay[i], "---");
-        lv_obj_align(s_fcDay[i], LV_ALIGN_TOP_MID, colX[i], 226);
+        lv_obj_align(s_fcDay[i], LV_ALIGN_TOP_MID, colX[i], 212);
+
+        s_fcDayIcon[i] = lv_obj_create(wp);
+        weather_icon_attach(s_fcDayIcon[i]);
+        lv_obj_set_size(s_fcDayIcon[i], 44, 44);
+        lv_obj_align(s_fcDayIcon[i], LV_ALIGN_TOP_MID, colX[i], 230);
         s_fcDayCondition[i] = lv_label_create(wp);
         lv_obj_set_width(s_fcDayCondition[i], 116);
         lv_obj_set_style_text_font(s_fcDayCondition[i], F12(), 0);
@@ -1479,17 +1532,17 @@ void ui_create(void) {
         lv_obj_set_style_text_align(s_fcDayCondition[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(s_fcDayCondition[i], LV_LABEL_LONG_WRAP);
         lv_label_set_text(s_fcDayCondition[i], "");
-        lv_obj_align(s_fcDayCondition[i], LV_ALIGN_TOP_MID, colX[i], 254);
+        lv_obj_align(s_fcDayCondition[i], LV_ALIGN_TOP_MID, colX[i], 276);
         s_fcDayTemp[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcDayTemp[i], F14(), 0);
         lv_obj_set_style_text_color(s_fcDayTemp[i], UI_INK, 0);
         lv_label_set_text(s_fcDayTemp[i], "");
-        lv_obj_align(s_fcDayTemp[i], LV_ALIGN_TOP_MID, colX[i], 292);
+        lv_obj_align(s_fcDayTemp[i], LV_ALIGN_TOP_MID, colX[i], 304);
         s_fcDayRain[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcDayRain[i], F12(), 0);
         lv_obj_set_style_text_color(s_fcDayRain[i], lv_color_hex(0x4DDCFF), 0);
         lv_label_set_text(s_fcDayRain[i], "");
-        lv_obj_align(s_fcDayRain[i], LV_ALIGN_TOP_MID, colX[i], 320);
+        lv_obj_align(s_fcDayRain[i], LV_ALIGN_TOP_MID, colX[i], 328);
     }
     s_fcUpdated = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcUpdated, F12(), 0);
@@ -1586,52 +1639,98 @@ void ui_create(void) {
     lv_obj_align(s_trkHint, LV_ALIGN_CENTER, 0, 20);
 
     // --- clock tile (watch face + current weather + 3-day strip) ---
+    // Laid out as a watch face rather than a column of text: a seconds arc at the rim
+    // (echoing the radar sweep), the time on the centre line, and the weather sitting
+    // below a hairline rule so the two halves read as separate information.
     lv_obj_t *cp = make_round_panel(s_tileClock);
     lv_obj_set_style_bg_color(cp, lv_color_black(), 0);   // true black: kind to the AMOLED at night
-    make_tile_title(cp, "CLOCK");
+
+    s_clockRing = lv_obj_create(cp);                      // static outer ring, radar-like
+    lv_obj_remove_style_all(s_clockRing);
+    lv_obj_set_size(s_clockRing, 442, 442);
+    lv_obj_center(s_clockRing);
+    lv_obj_set_style_radius(s_clockRing, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_color(s_clockRing, UI_GREEN, 0);
+    lv_obj_set_style_border_opa(s_clockRing, 45, 0);
+    lv_obj_set_style_border_width(s_clockRing, 1, 0);
+    lv_obj_clear_flag(s_clockRing, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    s_clockArc = lv_arc_create(cp);                       // seconds, sweeping the rim
+    lv_obj_set_size(s_clockArc, 424, 424);
+    lv_obj_center(s_clockArc);
+    lv_arc_set_rotation(s_clockArc, 270);                 // start at 12 o'clock
+    lv_arc_set_bg_angles(s_clockArc, 0, 360);
+    lv_arc_set_range(s_clockArc, 0, 59);
+    lv_arc_set_value(s_clockArc, 0);
+    lv_obj_remove_style(s_clockArc, NULL, LV_PART_KNOB);  // no drag handle on a clock
+    lv_obj_clear_flag(s_clockArc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_color(s_clockArc, UI_GREEN, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(s_clockArc, 30, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_clockArc, 4, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_clockArc, UI_GREEN, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(s_clockArc, 235, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(s_clockArc, 4, LV_PART_INDICATOR);
 
     s_clockTime = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockTime, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_clockTime, UI_INK, 0);
     lv_label_set_text(s_clockTime, "--:--");
-    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, -10, -70);
+    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, -14, -74);
 
-    s_clockSec = lv_label_create(cp);
+    s_clockSec = lv_label_create(cp);                     // meridiem only; seconds are the arc
     lv_obj_set_style_text_font(s_clockSec, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_clockSec, UI_GREEN, 0);
     lv_label_set_text(s_clockSec, "");
-    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, 84, -58);
+    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, 84, -62);
 
     s_clockDate = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockDate, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_clockDate, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_clockDate, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_clockDate, "");
-    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, 0, -34);
+
+    s_clockRule = lv_obj_create(cp);                      // hairline between time and weather
+    lv_obj_remove_style_all(s_clockRule);
+    lv_obj_set_size(s_clockRule, 150, 1);
+    lv_obj_align(s_clockRule, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_set_style_bg_color(s_clockRule, UI_GREEN, 0);
+    lv_obj_set_style_bg_opa(s_clockRule, 70, 0);
+    lv_obj_clear_flag(s_clockRule, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    s_clockIcon = lv_obj_create(cp);                      // current conditions, left of the temp
+    weather_icon_attach(s_clockIcon);
+    lv_obj_set_size(s_clockIcon, 54, 54);
+    lv_obj_align(s_clockIcon, LV_ALIGN_CENTER, -66, 30);
 
     s_clockTemp = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockTemp, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_clockTemp, UI_INK, 0);
     lv_label_set_text(s_clockTemp, "");
-    lv_obj_align(s_clockTemp, LV_ALIGN_CENTER, 0, 26);
+    lv_obj_align(s_clockTemp, LV_ALIGN_CENTER, 24, 20);
 
     s_clockCond = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockCond, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_clockCond, UI_SOFT, 0);
     lv_label_set_text(s_clockCond, "");
-    lv_obj_align(s_clockCond, LV_ALIGN_CENTER, 0, 56);
+    lv_obj_align(s_clockCond, LV_ALIGN_CENTER, 24, 46);
 
-    const int clkColX[3] = { -110, 0, 110 };
+    const int clkColX[3] = { -104, 0, 104 };
     for (int i = 0; i < 3; ++i) {
         s_clockDay[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDay[i], &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(s_clockDay[i], UI_GREEN, 0);
         lv_label_set_text(s_clockDay[i], "");
-        lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], 96);
+        lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], 90);
+        s_clockDayIcon[i] = lv_obj_create(cp);
+        weather_icon_attach(s_clockDayIcon[i]);
+        lv_obj_set_size(s_clockDayIcon[i], 38, 38);
+        lv_obj_align(s_clockDayIcon[i], LV_ALIGN_CENTER, clkColX[i], 119);
         s_clockDayTemp[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDayTemp[i], &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(s_clockDayTemp[i], UI_SOFT, 0);
         lv_label_set_text(s_clockDayTemp[i], "");
-        lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], 118);
+        lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], 146);
     }
     lv_timer_create(clock_tick_cb, 1000, nullptr);
 

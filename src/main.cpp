@@ -1285,6 +1285,61 @@ static void handleQuiet() {   // quiet hours: mode + window (applies live)
     g_web.send(200, "text/plain", "ok");
 }
 
+// ---- screenshots: GET /shot.bmp, and GET /view?i=N to pick a screen first ----
+// Serves the live framebuffer as a 24-bit BMP so it opens anywhere. Rows are emitted
+// bottom-up and padded to 4 bytes, per the format. Useful for documentation shots:
+// photographing a glossy round AMOLED never looks as good as the real pixels.
+static void handleShot() {
+    const uint16_t *fb = display::captureFrame();
+    if (!fb) { g_web.send(503, "text/plain", "no framebuffer"); return; }
+
+    const int W = SCREEN_W, H = SCREEN_H;
+    const int rowBytes = W * 3;
+    const int pad = (4 - (rowBytes % 4)) % 4;
+    const uint32_t imgSize = (uint32_t)(rowBytes + pad) * H;
+    const uint32_t fileSize = 54 + imgSize;
+
+    uint8_t hdr[54] = {0};
+    hdr[0] = 'B'; hdr[1] = 'M';
+    memcpy(hdr + 2, &fileSize, 4);
+    const uint32_t off = 54;   memcpy(hdr + 10, &off, 4);
+    const uint32_t dib = 40;   memcpy(hdr + 14, &dib, 4);
+    const int32_t w32 = W, h32 = H;
+    memcpy(hdr + 18, &w32, 4); memcpy(hdr + 22, &h32, 4);
+    const uint16_t planes = 1, bpp = 24;
+    memcpy(hdr + 26, &planes, 2); memcpy(hdr + 28, &bpp, 2);
+    memcpy(hdr + 34, &imgSize, 4);
+
+    g_web.setContentLength(fileSize);
+    g_web.send(200, "image/bmp", "");
+    g_web.sendContent((const char *)hdr, sizeof(hdr));
+
+    // One row at a time: 466*3 bytes is a comfortable chunk, and the whole image would
+    // be 650 KB if buffered. RGB565 -> BGR888, expanding the top bits into the low ones
+    // so full-scale stays full-scale.
+    static uint8_t row[SCREEN_W * 3 + 4];
+    for (int y = H - 1; y >= 0; --y) {
+        const uint16_t *src = fb + (size_t)y * W;
+        uint8_t *o = row;
+        for (int x = 0; x < W; ++x) {
+            const uint16_t p = src[x];
+            const uint8_t r = (uint8_t)((p >> 11) & 0x1F), g = (uint8_t)((p >> 5) & 0x3F), b = (uint8_t)(p & 0x1F);
+            *o++ = (uint8_t)((b << 3) | (b >> 2));
+            *o++ = (uint8_t)((g << 2) | (g >> 4));
+            *o++ = (uint8_t)((r << 3) | (r >> 2));
+        }
+        for (int i = 0; i < pad; ++i) *o++ = 0;
+        g_web.sendContent((const char *)row, rowBytes + pad);
+    }
+    g_web.sendContent("", 0);
+}
+
+static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock)
+    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 5));
+    if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
+    g_web.send(200, "text/plain", "ok");
+}
+
 // ---- custom alert sound: upload a WAV, converted on the fly to 16 kHz mono PCM ----
 static bool g_soundUploadOk = false;
 
@@ -1527,6 +1582,8 @@ void setup() {
         },
         handleSoundUpload);
     g_web.on("/sounddel", HTTP_POST, handleSoundDelete);
+    g_web.on("/shot.bmp", handleShot);
+    g_web.on("/view", handleView);
     g_web.on("/clockfmt", handleClockFmt);
     g_web.on("/typeicons", handleTypeIcons);
     g_web.on("/units", handleUnits);
