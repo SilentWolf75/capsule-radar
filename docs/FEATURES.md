@@ -123,6 +123,24 @@ on a zoomed-in scope. Labels are drawn for every airport when 14 or fewer are on
 and for large ones only beyond that, so a zoomed-in view names the local field without
 turning a wide view into a wall of text.
 
+## Map basemap: why compose() is banded
+Turning the basemap on used to put the device into a reboot loop within ~30 seconds.
+`compose()` resamples every one of 466x466 scope pixels through an inverse
+great-circle + Mercator projection - `sqrt`, `asin`, `atan2`, `sin`, `cos`, `log` per
+pixel - and the ESP32-S3 has no double-precision FPU, so all of that is emulated in
+software. Running it to completion in one call held CPU 0 for several seconds, IDLE0
+never ran, and the task watchdog aborted.
+
+It now composes `MAP_COMPOSE_ROWS` rows per `map_client_step()` call. The network task
+already invokes that once per iteration and then sleeps 250 ms, so the work is spread
+over ~20 calls and the scheduler gets the CPU back between bands. The visible cost is
+that the basemap takes a few seconds to appear; the alternative was a device that
+rebooted whenever the feature was enabled.
+
+This is the failure mode to expect from anything heavy added to `adsb_task`: it shares
+a core with IDLE0 and the watchdog, so long uninterrupted work there is fatal rather
+than merely slow.
+
 ## Military contacts
 The feed's `dbFlags` bit 0 marks military airframes. It reaches the audio alerts and the
 feed filter, and now the display too: four violet corner brackets around the glyph, a

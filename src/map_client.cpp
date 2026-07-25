@@ -214,7 +214,17 @@ static bool fetch_one_tile(int idx) {
 }
 
 // --- resample: scope pixel -> lat/lon -> mercator world pixel -> mosaic sample ---
-static void compose(void) {
+//
+// Done a band of rows at a time. Composing all 466x466 pixels in one call ran for
+// several seconds without yielding - the ESP32-S3 has no double-precision FPU, so every
+// sqrt/asin/atan2/log here is emulated in software - which starved IDLE0 and let the
+// task watchdog reboot the device. That is a hard reboot loop the moment the basemap is
+// switched on, so the loop must hand the CPU back regularly.
+#define MAP_COMPOSE_ROWS 24        // ~11k pixels per call; comfortably inside the 5 s WDT
+
+static int s_composeRow = 0;
+
+static void compose_band(int y0, int rows) {
     uint16_t *dst = map_bg_back_buffer();
     if (!dst || !s_mosaic) return;
 
@@ -229,7 +239,8 @@ static void compose(void) {
     const int cx = SCREEN_CX, cy = SCREEN_CY;
     const long rMax = (long)RADAR_R_OUTER_PX * RADAR_R_OUTER_PX;
 
-    for (int py = 0; py < MAP_BG_SIZE; ++py) {
+    const int yEnd = (y0 + rows > MAP_BG_SIZE) ? MAP_BG_SIZE : (y0 + rows);
+    for (int py = y0; py < yEnd; ++py) {
         const long dy = py - cy;
         uint16_t *row = dst + (size_t)py * MAP_BG_SIZE;
         for (int px = 0; px < MAP_BG_SIZE; ++px) {
@@ -260,7 +271,6 @@ static void compose(void) {
             row[px] = (uint16_t)((((r5 * 5) >> 3) << 11) | (((g6 * 5) >> 3) << 5) | ((b5 * 5) >> 3));
         }
     }
-    map_bg_commit(s_lat, s_lon, s_rangeKm);
 }
 
 bool map_client_step(void) {
@@ -269,10 +279,10 @@ bool map_client_step(void) {
 
     if (s_state == MAP_FETCH) {
         const int total = s_nx * s_ny;
-        if (s_tileIdx >= total) { s_state = MAP_COMPOSE; return true; }
+        if (s_tileIdx >= total) { s_state = MAP_COMPOSE; s_composeRow = 0; return true; }
         if (!fetch_one_tile(s_tileIdx)) ++s_failed;       // missing tile stays black
         ++s_tileIdx;
-        if (s_tileIdx >= total) s_state = MAP_COMPOSE;
+        if (s_tileIdx >= total) { s_state = MAP_COMPOSE; s_composeRow = 0; }
         return true;
     }
 
@@ -283,7 +293,14 @@ bool map_client_step(void) {
         free_mosaic();
         return false;
     }
-    compose();
+
+    // One band per call, so the task returns to its loop (and the scheduler) between
+    // bands instead of monopolising CPU 0 until the watchdog fires.
+    compose_band(s_composeRow, MAP_COMPOSE_ROWS);
+    s_composeRow += MAP_COMPOSE_ROWS;
+    if (s_composeRow < MAP_BG_SIZE) return true;          // more bands to go
+
+    map_bg_commit(s_lat, s_lon, s_rangeKm);
     s_haveLat = s_lat; s_haveLon = s_lon; s_haveRange = s_rangeKm;
     s_state = MAP_IDLE;
     free_mosaic();                                        // the composed image is all we keep
