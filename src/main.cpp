@@ -494,11 +494,32 @@ static void handleRoot() {
     // the user's chosen distance unit so the config page matches the screen.
     const float    ufac  = (g_units == 0) ? 0.539957f : (g_units == 2 ? 0.621371f : 1.0f);
     const char    *uname = (g_units == 0) ? "nm" : (g_units == 2 ? "mi" : "km");
+    // Pinch-zoom sets any range it likes, so the live value usually isn't one of the
+    // fixed steps. Without an entry for it nothing is marked selected and the browser
+    // silently shows the first option — the page would claim 10 km while the scope ran
+    // at 37. Splice the current value into the list, in order, when it's not already one.
+    const int nRanges = (int)(sizeof(ranges) / sizeof(ranges[0]));
+    const int curRange = (int)(g_settings.rangeKm + 0.5f);
+    bool curListed = false;
+    for (int r : ranges) if (r == curRange) curListed = true;
     String ropts;
-    for (int r : ranges) {
+    bool spliced = curListed;
+    for (int i = 0; i < nRanges; ++i) {
         char o[72];
+        if (!spliced && curRange < ranges[i]) {
+            snprintf(o, sizeof(o), "<option value=%d selected>%.0f %s</option>",
+                     curRange, curRange * ufac, uname);
+            ropts += o;
+            spliced = true;
+        }
         snprintf(o, sizeof(o), "<option value=%d%s>%.0f %s</option>",
-                 r, (r == (int)(g_settings.rangeKm + 0.5f)) ? " selected" : "", r * ufac, uname);
+                 ranges[i], (ranges[i] == curRange) ? " selected" : "", ranges[i] * ufac, uname);
+        ropts += o;
+    }
+    if (!spliced) {                       // current range is wider than every fixed step
+        char o[72];
+        snprintf(o, sizeof(o), "<option value=%d selected>%.0f %s</option>",
+                 curRange, curRange * ufac, uname);
         ropts += o;
     }
     const char *tnames[] = {"Phosphor", "Orb", "Amber CRT", "Military"};

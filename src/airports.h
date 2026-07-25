@@ -9,7 +9,10 @@
 void airports_project(double homeLat, double homeLon, double rangeKm,
                       float cx, float cy, float rOuterPx);
 
-void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa);
+// Markers and labels are styled separately on purpose: the ring/dot should sit quietly
+// under the traffic, but the ident has to be readable or there is no point drawing it.
+void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa,
+                   lv_color_t labelColor, lv_opa_t labelOpa);
 
 // Find the nearest recognizable airport (one with an IATA code). Used by the
 // weather view for aviation context; entirely offline from the embedded data.

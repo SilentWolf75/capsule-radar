@@ -44,7 +44,8 @@ void airports_project(double homeLat, double homeLon, double rangeKm,
     }
 }
 
-void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa) {
+void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa,
+                   lv_color_t labelColor, lv_opa_t labelOpa) {
     if (s_apts.empty()) return;
 
     lv_draw_arc_dsc_t ring;
@@ -57,7 +58,7 @@ void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa) {
 
     lv_draw_label_dsc_t lbl;
     lv_draw_label_dsc_init(&lbl);
-    lbl.color = color; lbl.opa = opa; lbl.font = &lv_font_montserrat_12;
+    lbl.color = labelColor; lbl.opa = labelOpa; lbl.font = &lv_font_montserrat_14;
 
     const bool labelAll = (s_apts.size() <= APT_LABEL_ALL_MAX);
     for (const Apt &ap : s_apts) {
