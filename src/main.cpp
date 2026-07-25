@@ -12,6 +12,16 @@
 #include "route_client.h"
 #include "photo.h"
 #include "photo_client.h"
+#include "airline.h"
+#include "airline_client.h"
+#include "wildfire.h"
+#include "wildfire_client.h"
+#include "map_bg.h"
+#include "map_client.h"
+#include "vessel.h"
+#include "ais_client.h"
+#include "wav_upload.h"
+#include <LittleFS.h>
 #include "weather.h"
 #include "weather_client.h"
 #include "wx_radar.h"
@@ -49,7 +59,13 @@ static WiFiManager           g_wm;
 static int                   g_brightnessDay = BRIGHTNESS_DEFAULT;   // user brightness (web/NVS)
 static int                   g_volume = 60;                          // alert volume 0..100 (web/NVS)
 static bool                  g_muted  = false;                       // mute alert pings
-static int                   g_alertMode = 2;                        // 0=off 1=emergencies 2=new+emergencies (web/NVS)
+static int                   g_packNew   = AUDIO_PACK_CHIME;         // sound for new contacts (web/NVS)
+static int                   g_packAlert = AUDIO_PACK_CHIME;         // sound for emergencies (web/NVS)
+// Alert mode is a bitmask: bit 0 = new contacts, bit 1 = emergencies.
+// 0 = off, 1 = new only, 2 = emergencies only, 3 = both.
+#define ALERT_NEW   0x1
+#define ALERT_EMERG 0x2
+static int                   g_alertMode = ALERT_NEW | ALERT_EMERG;  // (web/NVS)
 static float                 g_proximityKm = 0.0f;                   // proximity alert radius, km (0=off) (web/NVS)
 static uint32_t              g_idleDimMs = IDLE_DIM_MS;              // dim after this idle time (0 = never)
 static bool                  g_showSweep = true;                     // rotating sweep line on/off (web/NVS)
@@ -71,6 +87,20 @@ static volatile bool         g_feedOk = true;                        // ADS-B fe
 static volatile uint32_t     g_lastFeedOkMs = 0;                     // millis() of the last good poll (HUD staleness)
 static volatile uint32_t     g_rebootAtMs = 0;                       // !=0: reboot when millis() reaches it (clean start after WiFi config)
 static String                g_tz = TZ_STR;                          // POSIX timezone (web-configurable, NVS); applied via configTzTime
+static int                   g_qhMode  = 0;                          // quiet hours: 0=off 1=dim 2=screen off 3=clock screen (web/NVS)
+static int                   g_qhStart = 22 * 60;                    // quiet-hours start, minutes since midnight (web/NVS)
+static int                   g_qhEnd   = 7 * 60;                     // quiet-hours end, minutes since midnight (web/NVS)
+static bool                  g_inQuiet = false;                      // currently inside the quiet-hours window
+static bool                  g_showFires = true;                     // FIRMS wildfire markers on/off (web/NVS)
+static String                g_firmsKey;                             // NASA FIRMS MAP_KEY (web/NVS; empty = off)
+static volatile bool         g_firesDirty = false;
+static volatile bool         g_mapDirty = false;
+static bool                  g_mapBg = false;                        // map-tile background on/off (web/NVS)
+static int                   g_mapStyle = 0;                         // 0 = dark, 1 = light (web/NVS)
+static bool                  g_time24 = false;                       // false = 12-hour clock (web/NVS)
+static bool                  g_typeIcons = true;                     // per-type aircraft silhouettes (web/NVS)
+static int                   g_trafficMode = 0;                      // 0 = aircraft, 1 = marine (web/NVS)
+static String                g_aisKey;                               // aisstream.io API key (web/NVS; empty = off)
 static volatile bool         g_weatherDirty = false;
 static volatile bool         g_wxRadarDirty = false;
 static volatile bool         g_cloudImageDirty = false;
@@ -101,6 +131,8 @@ static const struct { const char *label; const char *tz; int offMin; int dst; } 
 };
 static const int TZOPTS_N = sizeof(TZOPTS) / sizeof(TZOPTS[0]);
 
+static float queryRadiusKm();   // defined below; the feed task needs it for the fire bbox
+
 // ---- networking task (core 0): fetch + parse, never touches the display ----
 static void adsb_task(void*) {
     std::vector<Aircraft> fresh;
@@ -111,6 +143,7 @@ static void adsb_task(void*) {
     uint32_t nextWeatherAt = UINT32_MAX;       // armed five seconds after WiFi connects
     uint32_t nextWxRadarAt = UINT32_MAX;
     uint32_t nextCloudImageAt = UINT32_MAX;
+    uint32_t nextFiresAt = UINT32_MAX;
     uint32_t lastFeedOk = millis();          // self-heal: time of last good (or no-WiFi) poll
     for (;;) {
         const bool conn = (WiFi.status() == WL_CONNECTED);
@@ -124,6 +157,7 @@ static void adsb_task(void*) {
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
+            nextFiresAt = millis() + 20000UL;
             // mDNS + OTA are started on core 1 (loop) to keep all mDNS use on one core
         }
         wasConnected = conn;
@@ -217,18 +251,49 @@ static void adsb_task(void*) {
                     Serial.println("[clouds] fetch failed; retrying in 60s");
                 }
             }
+            // Active fires refresh slowly (FIRMS publishes new satellite passes a few
+            // times a day) and only when a MAP_KEY has been entered.
+            if ((int32_t)(nowMs - nextFiresAt) >= 0) {
+                if (!wildfire_has_key()) {
+                    nextFiresAt = millis() + FIRE_REFRESH_MS;   // re-check later; key may be added
+                } else if (wildfire_fetch(g_settings.homeLat, g_settings.homeLon, queryRadiusKm())) {
+                    g_firesDirty = true;
+                    nextFiresAt = millis() + FIRE_REFRESH_MS;
+                } else {
+                    nextFiresAt = millis() + 120000UL;
+                    Serial.println("[fire] fetch failed; retrying in 120s");
+                }
+            }
+            // AIS: non-blocking socket pump; also keeps the subscription box in sync
+            // with the scope as the range or home position changes.
+            if (ais_has_key()) {
+                ais_configure(g_settings.homeLat, g_settings.homeLon, queryRadiusKm());
+                ais_loop();
+            }
+            // Map background: one tile per iteration, so a 9-16 tile build never blocks
+            // the live feed. Returns true while more work remains.
+            if (map_client_enabled()) {
+                static bool mapWasBusy = false;
+                map_client_request(g_settings.homeLat, g_settings.homeLon, g_settings.rangeKm);
+                const bool busy = map_client_step();
+                // The commit happens on the step that finishes the build, and that step
+                // reports "no work left" — so flag the repaint on the busy->idle edge.
+                if (mapWasBusy && !busy) g_mapDirty = true;
+                mapWasBusy = busy;
+            }
             // Then the on-demand lookups for the selected aircraft. Their timeouts are kept
             // short (see photo_client / route_client) so a slow photo server can't freeze the
             // feed for long; the next loop iteration polls again as soon as they return.
             char wantCall[12];
             if (route_pending(wantCall, sizeof(wantCall))) {
                 char from[40] = "", to[40] = "";
-                if (route_cache_get(wantCall, from, sizeof(from), to, sizeof(to))) {
-                    route_store(wantCall, from, to);                       // NVS hit, no network
+                RouteCoords rc;
+                if (route_cache_get(wantCall, from, sizeof(from), to, sizeof(to), &rc)) {
+                    route_store_full(wantCall, from, to, rc);              // NVS hit, no network
                     Serial.printf("[route] %s (cache): '%s' -> '%s'\n", wantCall, from, to);
-                } else if (route_fetch(wantCall, from, sizeof(from), to, sizeof(to))) {
-                    route_store(wantCall, from, to);
-                    route_cache_put(wantCall, from, to);                  // remember across reboots
+                } else if (route_fetch(wantCall, from, sizeof(from), to, sizeof(to), &rc)) {
+                    route_store_full(wantCall, from, to, rc);
+                    route_cache_put(wantCall, from, to, &rc);             // remember across reboots
                     Serial.printf("[route] %s (net): '%s' -> '%s'\n", wantCall, from, to);
                 } else {
                     route_store(wantCall, from, to);   // empty -> don't refetch this session
@@ -237,6 +302,8 @@ static void adsb_task(void*) {
             }
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
+            char wantIata[4];
+            if (airline_logo_pending(wantIata, sizeof(wantIata))) airline_logo_fetch(wantIata);
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -251,7 +318,21 @@ static void loadSettings() {
     g_brightnessDay    = p.getInt("bright", BRIGHTNESS_DEFAULT);
     g_volume           = p.getInt("vol", 60);
     g_muted            = p.getBool("mute", false);
-    g_alertMode        = p.getInt("alertmode", 2);
+    // A custom sound is almost certainly why someone uploaded one, so default the
+    // emergency cue to it; routine new-contact pings stay on the gentler chime.
+    const int defAlert = audio_has_sample() ? AUDIO_PACK_CUSTOM : AUDIO_PACK_CHIME;
+    g_packNew          = p.getInt("packnew",   p.getInt("sndpack", AUDIO_PACK_CHIME));
+    g_packAlert        = p.getInt("packalert", p.getInt("sndpack", defAlert));
+    // Alert mode changed meaning (it is a bitmask now), so it lives under a new key and
+    // old installs are migrated rather than silently reinterpreted: the previous value 2
+    // meant "new + emergencies", which as a bitmask would read as "emergencies only".
+    if (p.isKey("alertmode2")) {
+        g_alertMode = p.getInt("alertmode2", ALERT_NEW | ALERT_EMERG);
+    } else {
+        const int legacy = p.getInt("alertmode", 2);
+        g_alertMode = (legacy == 0) ? 0 : (legacy == 1 ? ALERT_EMERG : (ALERT_NEW | ALERT_EMERG));
+    }
+    g_alertMode = constrain(g_alertMode, 0, 3);
     g_proximityKm      = p.getFloat("proxkm", 0.0f);
     g_useGps           = p.getBool("usegps", false);
     g_trailLen         = p.getInt("traillen", 2);
@@ -259,7 +340,23 @@ static void loadSettings() {
     g_idleDimMs        = p.getUInt("idledim", IDLE_DIM_MS);
     g_units            = p.getInt("units", 0);
     g_tz               = p.getString("tz", TZ_STR);
+    g_qhMode           = p.getInt("qhmode", 0);
+    g_qhStart          = p.getInt("qhstart", 22 * 60);
+    g_qhEnd            = p.getInt("qhend", 7 * 60);
+    g_showFires        = p.getBool("fires", true);
+    g_firmsKey         = p.getString("firmskey", "");
+    g_mapBg            = p.getBool("mapbg", false);
+    g_mapStyle         = p.getInt("mapstyle", 0);
+    g_trafficMode      = p.getInt("traffic", 0);
+    g_aisKey           = p.getString("aiskey", "");
+    g_time24           = p.getBool("time24", false);
+    g_typeIcons        = p.getBool("typeicons", true);
     p.end();
+    ui_set_time_24h(g_time24);
+    wildfire_set_key(g_firmsKey.c_str());
+    map_client_set_style(g_mapStyle);
+    map_client_enable(g_mapBg);
+    ais_set_key(g_aisKey.c_str());
 }
 
 // Audio alerts. g_alertMode: 0 = off, 1 = emergencies only, 2 = new aircraft + emergencies.
@@ -284,10 +381,10 @@ static void checkAudioEvents() {
             if (!first && !seenProx.count(hex)) audio_play(AUDIO_ALERT);
         }
 
-        // new-in-range pings (on entry), gated by the alert mode
+        // new-in-range pings (on entry), gated independently by each alert-mode bit
         if (isNew) {
-            if (emergency) { if (g_alertMode >= 1) audio_play(AUDIO_ALERT); }   // emergencies only / +new
-            else if (g_alertMode >= 2 && millis() - lastNew > 3000) {
+            if (emergency) { if (g_alertMode & ALERT_EMERG) audio_play(AUDIO_ALERT); }
+            else if ((g_alertMode & ALERT_NEW) && millis() - lastNew > 3000) {
                 audio_play(AUDIO_NEW);                                          // new contact (rate-limited)
                 lastNew = millis();
             }
@@ -322,6 +419,15 @@ static void onRangeChange(float km) {
     ui_on_data_updated();
 }
 
+// Pinch-zoom preview: re-project the last snapshot at the new range every ~120 ms
+// while the gesture runs. No NVS write / feed re-query until the fingers lift
+// (ui_pinch_touch then calls onRangeChange with the final value).
+static void onRangePreview(float km) {
+    g_settings.rangeKm = km;
+    radar::update(g_snap, g_settings);
+    ui_set_range_km(km);
+}
+
 // Persist the visual theme in NVS (called when the user long-presses to switch).
 static void saveTheme(int t) {
     Preferences p;
@@ -348,12 +454,26 @@ static void rtc_seed_clock() {
     Serial.println("[rtc] system clock seeded from RTC");
 }
 
-// Brightness combines idle auto-dim and face-down sleep (sleep wins -> screen off).
+// Quiet-hours window test (minutes since local midnight; window may wrap midnight).
+static bool quietWindowNow() {
+    if (g_qhMode == 0 || g_qhStart == g_qhEnd) return false;
+    struct tm ti;
+    if (!getLocalTime(&ti, 0)) return false;          // clock not set yet -> no quiet hours
+    const int now = ti.tm_hour * 60 + ti.tm_min;
+    if (g_qhStart < g_qhEnd) return now >= g_qhStart && now < g_qhEnd;
+    return now >= g_qhStart || now < g_qhEnd;          // overnight window (e.g. 22:00-07:00)
+}
+
+// Brightness combines idle auto-dim, quiet hours and face-down sleep (sleep wins).
 static bool g_asleep = false;   // face-down
 static bool g_idle   = false;   // no touch for a while
 static void applyBrightness() {
     int b = g_brightnessDay;
     if (g_idle  && BRIGHTNESS_IDLE  < b) b = BRIGHTNESS_IDLE;   // idle only dims down
+    if (g_inQuiet && display::inactiveMs() >= 15000) {           // a touch wakes it for 15 s
+        if (g_qhMode == 2) b = 0;                                // screen off
+        else if (BRIGHTNESS_IDLE < b) b = BRIGHTNESS_IDLE;       // dim / clock modes
+    }
     if (g_asleep) b = 0;                                         // face-down -> screen off
     display::setBrightness(b);
 }
@@ -395,6 +515,47 @@ static void handleRoot() {
         iopts += o;
     }
     { char o[64]; snprintf(o, sizeof(o), "<option value=0%s>Never</option>", curIdle == 0 ? " selected" : ""); iopts += o; }
+    char sndStatus[96];
+    if (audio_sample_len())
+        snprintf(sndStatus, sizeof(sndStatus), "Loaded: %.2f s custom sound.",
+                 audio_sample_len() / 16000.0);
+    else
+        snprintf(sndStatus, sizeof(sndStatus), "No custom sound uploaded yet.");
+    const char *spnames[] = {"Chime (two-tone)", "Sonar ping", "Marimba pluck",
+                             "Aircraft warning", "Beep (classic)", "Custom sample"};
+    String npopts, epopts;
+    for (int i = 0; i < AUDIO_PACK_COUNT; ++i) {
+        char o[80];
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>",
+                 i, i == g_packNew ? " selected" : "", spnames[i]);
+        npopts += o;
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>",
+                 i, i == g_packAlert ? " selected" : "", spnames[i]);
+        epopts += o;
+    }
+    const char *tmnames[] = {"Aircraft (ADS-B)", "Marine vessels (AIS)"};
+    String tmopts;
+    for (int i = 0; i < 2; ++i) {
+        char o[80];
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>",
+                 i, i == g_trafficMode ? " selected" : "", tmnames[i]);
+        tmopts += o;
+    }
+    const char *cfnames[] = {"12-hour (AM/PM)", "24-hour"};
+    String cfopts;
+    for (int i = 0; i < 2; ++i) {
+        char o[72];
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>",
+                 i, (i == (g_time24 ? 1 : 0)) ? " selected" : "", cfnames[i]);
+        cfopts += o;
+    }
+    const char *msnames[] = {"Dark", "Light"};
+    String msopts;
+    for (int i = 0; i < 2; ++i) {
+        char o[64];
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_mapStyle ? " selected" : "", msnames[i]);
+        msopts += o;
+    }
     const char *unames[] = {"Aviation (ft, kt, nm)", "Metric (m, km/h, km)", "Imperial (ft, mph, mi)"};
     String uopts;
     for (int i = 0; i < 3; ++i) {
@@ -427,9 +588,11 @@ static void handleRoot() {
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", mv.ft, mv.ft == g_minAltFt ? " selected" : "", mv.lbl);
         maopts += o;
     }
-    const char *anames[] = {"Off", "Emergencies only", "New aircraft + emergencies"};
+    // Order matches the bitmask: 0 off, 1 new, 2 emergencies, 3 both.
+    const char *anames[] = {"Off", "New aircraft only", "Emergencies only",
+                            "New aircraft + emergencies"};
     String aopts;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         char o[80];
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_alertMode ? " selected" : "", anames[i]);
         aopts += o;
@@ -446,6 +609,13 @@ static void handleRoot() {
         snprintf(o, sizeof(o), "<option value=%.3f%s>%s</option>", pkm, sel ? " selected" : "", lbl);
         popts += o;
     }
+    const char *qnames[] = {"Off", "Dim screen", "Screen off", "Clock screen"};
+    String qopts;    // quiet-hours mode
+    for (int i = 0; i < 4; ++i) {
+        char o[80];
+        snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_qhMode ? " selected" : "", qnames[i]);
+        qopts += o;
+    }
     String tzopts;   // time-zone dropdown (value = index into TZOPTS; mapped to POSIX TZ on save)
     for (int i = 0; i < TZOPTS_N; ++i) {
         char o[128];
@@ -461,10 +631,13 @@ static void handleRoot() {
         gpsRow += "<div style='font-size:12px;opacity:.6;margin:-2px 0 6px'>"
                   "When on, the location above is used until the GPS gets a fix, then it takes over.</div>";
     }
-    static const size_t BUFSZ = 10240;
+    // ~8.7 KB of markup plus ~4.5 KB of generated <option> lists; sized with headroom
+    // because a truncated page renders as a broken form. It lives in PSRAM, so the
+    // slack is free. The check after snprintf reports if this ever stops being enough.
+    static const size_t BUFSZ = 20480;
     static char *buf = (char *)ps_malloc(BUFSZ);   // PSRAM: keep this big page buffer off the scarce
     if (!buf) return;                              //   internal heap (the contiguous RAM mbedTLS needs)
-    snprintf(buf, BUFSZ,
+    const int needed = snprintf(buf, BUFSZ,
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         "<title>Capsule Radar</title>"
@@ -504,12 +677,14 @@ static void handleRoot() {
         "<label>Display range</label><select name=range>%s</select>"
         "<label>Theme</label><select name=theme>%s</select>"
         "<label>Time zone</label><select name=tz>%s</select>"
-        "<button>Save &amp; restart</button></form></div>"
+        "<button>Save &amp; restart</button></form>"
+        "<label>Clock format</label><select onchange='cf(this.value)'>%s</select></div>"
         "<div class=card><div class=t>Display</div>"
         "<label>Brightness</label>"
         "<input type=range min=5 max=255 value='%d' oninput='b(this.value,0)' onchange='b(this.value,1)'>"
         "<label>Dim screen after</label><select onchange='d(this.value)'>%s</select>"
         "<label><input type=checkbox class=ck %s onchange='sw(this.checked)'>Show radar sweep</label>"
+        "<label><input type=checkbox class=ck %s onchange='ti(this.checked)'>Aircraft icons by type</label>"
         "<label><input type=checkbox class=ck %s onchange='ap(this.checked)'>Show airports</label>"
         "<label><input type=checkbox class=ck %s onchange='hg(this.checked)'>Hide aircraft on the ground</label>"
         "<label>Minimum altitude</label><select onchange='ma(this.value)'>%s</select>"
@@ -518,14 +693,68 @@ static void handleRoot() {
         "<label>Max aircraft on screen</label><select onchange='mx(this.value)'>%s</select>"
         "<label>Screen rotation (degrees clockwise)</label>"
         "<input type=number min=0 max=359 step=1 value='%d' onchange='ro(this.value)'>"
-        "<label>Units</label><select onchange='u(this.value)'>%s</select></div>"
+        "<label>Units</label><select onchange='u(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck %s onchange='mb(this.checked)'>Map background</label>"
+        "<label>Map style</label><select onchange='ms(this.value)'>%s</select>"
+        "<div style='font-size:12px;opacity:.6;margin-top:4px'>Basemap tiles are redrawn "
+        "after a zoom or a move, a few seconds behind the scope.</div></div>"
         "<div class=card><div class=t>Sound</div>"
         "<label>Volume</label>"
         "<input type=range min=0 max=100 value='%d' oninput='v(this.value,0)' onchange='v(this.value,1)'>"
         "<label><input type=checkbox class=ck %s onchange='m(this.checked)'>Mute alerts</label>"
-        "<label>Alert on</label><select onchange='al(this.value)'>%s</select>"
+        "<label>Alert on</label><select id=am onchange='al(this.value);av()'>%s</select>"
+        "<div id=asoff style='display:none;font-size:13px;color:#ffb23c;margin-top:8px'>"
+        "Alerts are off &mdash; nothing will sound on live traffic. The test buttons below "
+        "still work, so this is worth checking if alerts seem silent.</div>"
+        "<div id=nsnd><label>New aircraft sound</label>"
+        "<select onchange='sp(0,this.value)'>%s</select>"
+        "<button type=button class=sec onclick='t()'>Test new-aircraft sound</button></div>"
+        "<div id=esnd><label>Emergency sound</label>"
+        "<select onchange='sp(1,this.value)'>%s</select>"
+        "<button type=button class=sec onclick='ta()'>Test emergency sound</button></div>"
         "<label>Proximity alert</label><select onchange='px(this.value)'>%s</select>"
-        "<button type=button class=sec onclick='t()'>Test ping</button></div>"
+        "<div style='font-size:12px;opacity:.6;margin-top:8px'>Proximity alerts use the "
+        "emergency sound. Picking a sound plays it so you can compare.</div>"
+        "<div class=t style='margin-top:18px'>Custom sound</div>"
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 6px'>%s</p>"
+        "<input type=file id=sf accept='.wav,audio/wav'>"
+        "<button type=button onclick='su()'>Upload WAV</button>"
+        "<div id=sbar style='height:10px;background:#0c1a12;border-radius:5px;overflow:hidden;"
+        "margin-top:10px;display:none'><div id=sfill style='height:100%%;width:0;background:#1dff86'></div></div>"
+        "<div id=smsg style='margin-top:8px;font-size:13px;color:#9affc8'></div>"
+        "<button type=button class=w style='margin-top:10px' onclick='sd()'>Remove custom sound</button>"
+        "<div style='font-size:12px;opacity:.65;margin-top:10px;line-height:1.5'>"
+        "<b>WAV format</b><br>"
+        "&bull; Uncompressed <b>PCM</b>, <b>16-bit</b> (not 24/32-bit or float)<br>"
+        "&bull; Mono or stereo &mdash; stereo is mixed down automatically<br>"
+        "&bull; Any rate from 8 to 48 kHz &mdash; resampled to 16 kHz automatically<br>"
+        "&bull; Keep it under <b>4 seconds</b>; longer clips are trimmed with a fade<br>"
+        "&bull; Volume is normalised for you, so quiet recordings still come through<br>"
+        "In Audacity: <i>File &rarr; Export &rarr; Export as WAV</i>, encoding "
+        "<i>Signed 16-bit PCM</i>. MP3s must be converted to WAV first.</div></div>"
+        "<div class=card><div class=t>Traffic</div>"
+        "<label>Show on the scope</label><select onchange='ai(this.value)'>%s</select>"
+        "<div style='font-size:12px;opacity:.6;margin:4px 0 8px'>Aircraft and ships are "
+        "plotted separately &mdash; the scope shows one picture at a time. The list view "
+        "follows this setting.</div>"
+        "<label>aisstream.io API key (marine)</label>"
+        "<input value='%s' placeholder='paste your free aisstream key' onchange='ak(this.value)'>"
+        "<div style='font-size:12px;opacity:.6;margin-top:6px'>Free key from "
+        "<a href='https://aisstream.io' style='color:#9affc8'>aisstream.io</a>. "
+        "Coverage is crowd-sourced, so inland locations may see nothing.</div></div>"
+        "<div class=card><div class=t>Wildfires</div>"
+        "<label><input type=checkbox class=ck %s onchange='fr(this.checked)'>Show active fire markers</label>"
+        "<label>NASA FIRMS map key</label>"
+        "<input value='%s' placeholder='paste your free FIRMS key' onchange='fk(this.value)'>"
+        "<div style='font-size:12px;opacity:.6;margin-top:6px'>Free key from "
+        "<a href='https://firms.modaps.eosdis.nasa.gov/api/map_key/' style='color:#9affc8'>"
+        "firms.modaps.eosdis.nasa.gov</a>. Without a key this layer stays empty.</div></div>"
+        "<div class=card><div class=t>Quiet hours</div>"
+        "<label>Mode</label><select onchange='qm(this.value)'>%s</select>"
+        "<label>From</label><input type=time value='%02d:%02d' onchange='qs(this.value)'>"
+        "<label>Until</label><input type=time value='%02d:%02d' onchange='qe(this.value)'>"
+        "<div style='font-size:12px;opacity:.6;margin-top:6px'>During the window the screen dims, "
+        "switches off or shows the clock. A touch wakes it for 15 seconds.</div></div>"
         "<div class=card><div class=t>Network</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
         "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
@@ -542,6 +771,20 @@ static void handleRoot() {
         "function v(x,s){fetch('/vol?v='+x+(s?'&save=1':''))}"
         "function m(c){fetch('/vol?mute='+(c?1:0)+'&save=1')}"
         "function t(){fetch('/vol?test=1')}"
+        "function ta(){fetch('/vol?test=3')}"
+        "function su(){var f=document.getElementById('sf').files[0];"
+        "var m=document.getElementById('smsg');"
+        "if(!f){m.innerText='Choose a .wav file first';return}"
+        "var x=new XMLHttpRequest(),d=new FormData();d.append('f',f);"
+        "document.getElementById('sbar').style.display='block';m.innerText='Uploading...';"
+        "x.upload.onprogress=function(e){if(e.lengthComputable)"
+        "document.getElementById('sfill').style.width=(e.loaded/e.total*100)+'%%'};"
+        "x.onload=function(){m.innerText=(x.status==200)"
+        "?'Saved - playing it now. Alert sound set to Custom sample.':('Rejected: '+x.responseText)};"
+        "x.onerror=function(){m.innerText='Upload failed'};"
+        "x.open('POST','/sound');x.send(d);}"
+        "function sd(){fetch('/sounddel',{method:'POST'}).then(function(){"
+        "document.getElementById('smsg').innerText='Custom sound removed.'})}"
         "function d(v){fetch('/idle?v='+v+'&save=1')}"
         "function sw(c){fetch('/sweep?v='+(c?1:0)+'&save=1')}"
         "function ap(c){fetch('/airports?v='+(c?1:0)+'&save=1')}"
@@ -555,6 +798,23 @@ static void handleRoot() {
         "function al(v){fetch('/alerts?mode='+v+'&save=1')}"
         "function px(v){fetch('/alerts?prox='+v+'&save=1')}"
         "function gp(c){fetch('/gps?v='+(c?1:0)+'&save=1')}"
+        "function sp(c,v){fetch('/vol?cue='+c+'&pack='+v+'&save=1')}"
+        // Only show the sound picker for a cue that is actually enabled.
+        "function av(){var m=+document.getElementById('am').value;"
+        "document.getElementById('nsnd').style.display=(m&1)?'block':'none';"
+        "document.getElementById('esnd').style.display=(m&2)?'block':'none';"
+        "document.getElementById('asoff').style.display=m?'none':'block';}"
+        "function cf(v){fetch('/clockfmt?v='+v+'&save=1')}"
+        "function ti(c){fetch('/typeicons?v='+(c?1:0)+'&save=1')}"
+        "function ai(v){fetch('/ais?v='+v+'&save=1')}"
+        "function ak(v){fetch('/ais?key='+encodeURIComponent(v)+'&save=1')}"
+        "function mb(c){fetch('/map?v='+(c?1:0)+'&save=1')}"
+        "function ms(v){fetch('/map?style='+v+'&save=1')}"
+        "function fr(c){fetch('/fires?v='+(c?1:0)+'&save=1')}"
+        "function fk(v){fetch('/fires?key='+encodeURIComponent(v)+'&save=1')}"
+        "function qm(v){fetch('/quiet?mode='+v+'&save=1')}"
+        "function qs(v){fetch('/quiet?start='+encodeURIComponent(v)+'&save=1')}"
+        "function qe(v){fetch('/quiet?end='+encodeURIComponent(v)+'&save=1')}"
         // auto-pick the visitor's time zone from their browser clock (only if they haven't set one)
         "var TZSET=%d;(function(){if(TZSET)return;"
         "var d=new Date(),j=new Date(d.getFullYear(),0,1).getTimezoneOffset(),"
@@ -562,14 +822,28 @@ static void handleRoot() {
         "e=document.querySelector('select[name=tz]'),b=-1,i;"
         "for(i=0;i<e.options.length;i++){if(+e.options[i].dataset.off===o&&+e.options[i].dataset.dst===s){b=i;break;}}"
         "if(b<0)for(i=0;i<e.options.length;i++){if(+e.options[i].dataset.off===o){b=i;break;}}"
-        "if(b>=0)e.selectedIndex=b;})();</script></body></html>",
+        "if(b>=0)e.selectedIndex=b;})();"
+        "av();"   // apply the show/hide rule to the state the page loaded with
+        "</script></body></html>",
         g_settings.homeLat, g_settings.homeLon, gpsRow.c_str(), ropts.c_str(), topts.c_str(),
-        tzopts.c_str(),
+        tzopts.c_str(), cfopts.c_str(),
         g_brightnessDay, iopts.c_str(), g_showSweep ? "checked" : "",
+        g_typeIcons ? "checked" : "",
         g_showAirports ? "checked" : "", g_hideGround ? "checked" : "", maopts.c_str(), g_milOnly ? "checked" : "",
         tlopts.c_str(), mxopts.c_str(), g_rotation, uopts.c_str(),
-        g_volume, g_muted ? "checked" : "", aopts.c_str(), popts.c_str(),
+        g_mapBg ? "checked" : "", msopts.c_str(),
+        g_volume, g_muted ? "checked" : "", aopts.c_str(),
+        npopts.c_str(), epopts.c_str(), popts.c_str(),
+        sndStatus,
+        tmopts.c_str(), g_aisKey.c_str(),
+        g_showFires ? "checked" : "", g_firmsKey.c_str(),
+        qopts.c_str(), g_qhStart / 60, g_qhStart % 60, g_qhEnd / 60, g_qhEnd % 60,
         g_settings.homeLat, g_settings.homeLon, (g_tz == TZ_STR ? 0 : 1));
+    // A truncated page renders as a half-broken form rather than failing loudly, so say
+    // so on serial — it means BUFSZ needs raising after adding controls.
+    if (needed >= (int)BUFSZ)
+        Serial.printf("[web] config page truncated: needed %d bytes, buffer is %u\n",
+                      needed, (unsigned)BUFSZ);
     g_web.send(200, "text/html", buf);
 }
 
@@ -638,22 +912,34 @@ static void handleBright() {
 static void handleVol() {
     if (g_web.hasArg("v"))    { g_volume = constrain((int)g_web.arg("v").toInt(), 0, 100); audio_set_volume(g_volume); }
     if (g_web.hasArg("mute")) { g_muted = g_web.arg("mute").toInt() != 0; audio_set_muted(g_muted); }
+    if (g_web.hasArg("pack")) {
+        // cue=1 selects the emergency sound, anything else the new-contact sound.
+        const bool forAlert = g_web.hasArg("cue") && g_web.arg("cue").toInt() == 1;
+        const int pack = constrain((int)g_web.arg("pack").toInt(), 0, AUDIO_PACK_COUNT - 1);
+        if (forAlert) { g_packAlert = pack; audio_set_pack_for(AUDIO_ALERT, pack); }
+        else          { g_packNew   = pack; audio_set_pack_for(AUDIO_NEW,   pack); }
+        audio_play(forAlert ? AUDIO_ALERT : AUDIO_NEW);   // audition the cue being edited
+    }
     if (g_web.hasArg("save")) {
         Preferences p;
         p.begin("capsuleradar", false);
         p.putInt("vol", g_volume);
         p.putBool("mute", g_muted);
+        p.putInt("packnew", g_packNew);
+        p.putInt("packalert", g_packAlert);
         p.end();
     }
     if (g_web.hasArg("test")) {
-        if (g_web.arg("test").toInt() == 2) audio_selftest();   // long tone, ignores mute
-        else audio_play(AUDIO_NEW);
+        const int t = g_web.arg("test").toInt();
+        if (t == 2)      audio_selftest();          // long tone, ignores mute
+        else if (t == 3) audio_play(AUDIO_ALERT);   // emergency / military cue
+        else             audio_play(AUDIO_NEW);     // new-contact cue
     }
     g_web.send(200, "text/plain", "ok");
 }
 
 static void handleAlerts() {   // what triggers the alert sound (live)
-    if (g_web.hasArg("mode")) g_alertMode   = constrain((int)g_web.arg("mode").toInt(), 0, 2);
+    if (g_web.hasArg("mode")) g_alertMode   = constrain((int)g_web.arg("mode").toInt(), 0, 3);
     if (g_web.hasArg("prox")) {
         g_proximityKm = g_web.arg("prox").toFloat();   // km (0 = off)
         g_requeryKm = queryRadiusKm();                 // the query must cover the new alert circle
@@ -662,7 +948,7 @@ static void handleAlerts() {   // what triggers the alert sound (live)
     if (g_web.hasArg("save")) {
         Preferences p;
         p.begin("capsuleradar", false);
-        p.putInt("alertmode", g_alertMode);
+        p.putInt("alertmode2", g_alertMode);
         p.putFloat("proxkm", g_proximityKm);
         p.end();
     }
@@ -783,6 +1069,100 @@ static void handleAirports() {   // show/hide airport markers (live)
     g_web.send(200, "text/plain", "ok");
 }
 
+static void handleClockFmt() {   // 12/24-hour clock (live: HUD, clock face, WX stamps)
+    if (g_web.hasArg("v")) {
+        g_time24 = g_web.arg("v").toInt() != 0;
+        ui_set_time_24h(g_time24);
+        ui_on_data_updated();          // repaint anything already showing a timestamp
+        if (g_web.hasArg("save")) {
+            Preferences p;
+            p.begin("capsuleradar", false);
+            p.putBool("time24", g_time24);
+            p.end();
+        }
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleTypeIcons() {   // aircraft silhouettes: by type or one generic glyph
+    if (g_web.hasArg("v")) {
+        g_typeIcons = g_web.arg("v").toInt() != 0;
+        radar::setTypeIcons(g_typeIcons);
+        if (g_web.hasArg("save")) {
+            Preferences p;
+            p.begin("capsuleradar", false);
+            p.putBool("typeicons", g_typeIcons);
+            p.end();
+        }
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleAis() {   // traffic mode (aircraft vs marine) + aisstream.io key
+    if (g_web.hasArg("v")) {
+        g_trafficMode = constrain((int)g_web.arg("v").toInt(), 0, 1);
+        radar::setTrafficMode(g_trafficMode);
+        ui_on_data_updated();          // HUD count + list follow the mode immediately
+    }
+    if (g_web.hasArg("key")) {
+        g_aisKey = g_web.arg("key");
+        g_aisKey.trim();
+        ais_set_key(g_aisKey.c_str());     // empty key disconnects and clears the contacts
+    }
+    if (g_web.hasArg("save")) {
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putInt("traffic", g_trafficMode);
+        p.putString("aiskey", g_aisKey);
+        p.end();
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleMap() {   // map-tile background: on/off + style
+    if (g_web.hasArg("v")) {
+        g_mapBg = g_web.arg("v").toInt() != 0;
+        map_client_enable(g_mapBg);
+        if (!g_mapBg) radar::update(g_snap, g_settings);   // hide it right away
+    }
+    if (g_web.hasArg("style")) {
+        g_mapStyle = constrain((int)g_web.arg("style").toInt(), 0, 1);
+        map_client_set_style(g_mapStyle);
+    }
+    if (g_web.hasArg("save")) {
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putBool("mapbg", g_mapBg);
+        p.putInt("mapstyle", g_mapStyle);
+        p.end();
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleFires() {   // FIRMS wildfire markers: visibility + API key
+    if (g_web.hasArg("v")) {
+        g_showFires = g_web.arg("v").toInt() != 0;
+        radar::setFiresEnabled(g_showFires);
+    }
+    if (g_web.hasArg("key")) {
+        g_firmsKey = g_web.arg("key");
+        g_firmsKey.trim();
+        wildfire_set_key(g_firmsKey.c_str());
+        if (g_firmsKey.length() == 0) {
+            wildfire_store(nullptr, 0);          // key cleared -> drop any markers on screen
+            radar::update(g_snap, g_settings);
+        }
+    }
+    if (g_web.hasArg("save")) {
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putBool("fires", g_showFires);
+        p.putString("firmskey", g_firmsKey);
+        p.end();
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
 static void handleGround() {   // hide/show on-ground aircraft (applies from the next feed poll)
     if (g_web.hasArg("v")) {
         g_hideGround = g_web.arg("v").toInt() != 0;
@@ -823,6 +1203,89 @@ static void handleGps() {   // auto-set the centre point from the LC76G GPS (-G 
         }
     }
     g_web.send(200, "text/plain", "ok");
+}
+
+// Parse an <input type=time> value ("HH:MM") into minutes since midnight; -1 if invalid.
+static int parseHhMm(const String &s) {
+    const int c = s.indexOf(':');
+    if (c < 1) return -1;
+    const int h = s.substring(0, c).toInt();
+    const int m = s.substring(c + 1).toInt();
+    if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
+    return h * 60 + m;
+}
+
+static void handleQuiet() {   // quiet hours: mode + window (applies live)
+    Preferences p;
+    bool save = g_web.hasArg("save");
+    if (save) p.begin("capsuleradar", false);
+    if (g_web.hasArg("mode")) {
+        g_qhMode = constrain((int)g_web.arg("mode").toInt(), 0, 3);
+        if (save) p.putInt("qhmode", g_qhMode);
+    }
+    if (g_web.hasArg("start")) {
+        const int v = parseHhMm(g_web.arg("start"));
+        if (v >= 0) { g_qhStart = v; if (save) p.putInt("qhstart", v); }
+    }
+    if (g_web.hasArg("end")) {
+        const int v = parseHhMm(g_web.arg("end"));
+        if (v >= 0) { g_qhEnd = v; if (save) p.putInt("qhend", v); }
+    }
+    if (save) p.end();
+    // re-evaluate immediately so a change takes effect without waiting for the IMU tick
+    const bool quiet = quietWindowNow();
+    if (quiet != g_inQuiet) {
+        g_inQuiet = quiet;
+        if (g_qhMode == 3) ui_show_view(quiet ? 4 : 0);
+    }
+    applyBrightness();
+    g_web.send(200, "text/plain", "ok");
+}
+
+// ---- custom alert sound: upload a WAV, converted on the fly to 16 kHz mono PCM ----
+static bool g_soundUploadOk = false;
+
+static void handleSoundUpload() {
+    HTTPUpload &up = g_web.upload();
+    if (up.status == UPLOAD_FILE_START) {
+        Serial.printf("[wav] upload start: %s\n", up.filename.c_str());
+        wav_upload_begin();
+        g_soundUploadOk = false;
+    } else if (up.status == UPLOAD_FILE_WRITE) {
+        wav_upload_data(up.buf, up.currentSize);
+    } else if (up.status == UPLOAD_FILE_END) {
+        g_soundUploadOk = wav_upload_end();
+        if (g_soundUploadOk) {
+            // A freshly uploaded sound is what you want to hear, and an emergency is the
+            // cue people upload for; leave the routine new-contact ping alone.
+            g_packAlert = AUDIO_PACK_CUSTOM;
+            audio_set_pack_for(AUDIO_ALERT, g_packAlert);
+            Preferences p;
+            p.begin("capsuleradar", false);
+            p.putInt("packalert", g_packAlert);
+            p.end();
+        }
+    }
+}
+
+static void handleSoundDelete() {
+    audio_clear_sample();
+    if (!audio_has_sample()) {                    // don't leave "Custom" selected with nothing behind it
+        Preferences p;
+        p.begin("capsuleradar", false);
+        if (g_packNew == AUDIO_PACK_CUSTOM) {
+            g_packNew = AUDIO_PACK_CHIME;
+            audio_set_pack_for(AUDIO_NEW, g_packNew);
+            p.putInt("packnew", g_packNew);
+        }
+        if (g_packAlert == AUDIO_PACK_CUSTOM) {
+            g_packAlert = AUDIO_PACK_WARN;
+            audio_set_pack_for(AUDIO_ALERT, g_packAlert);
+            p.putInt("packalert", g_packAlert);
+        }
+        p.end();
+    }
+    g_web.send(200, "text/plain", "removed");
 }
 
 // ---- browser OTA: upload an app .bin over WiFi and self-flash ----
@@ -879,6 +1342,11 @@ void setup() {
     }
     Serial.printf("PSRAM: %u bytes free\n", (unsigned)ESP.getFreePsram());
 
+    // Mount before loadSettings(): the default sound pack depends on whether a custom
+    // sound exists, and an uploaded one only becomes visible once the filesystem is up.
+    if (!LittleFS.begin(true)) Serial.println("[fs] LittleFS mount failed (uploads unavailable)");
+    else audio_load_sample();   // restore a previously uploaded alert sound
+
     loadSettings();
     route_cache_begin();   // clear stale route cache if the label format changed
 
@@ -908,6 +1376,9 @@ void setup() {
         radar::setTheme(t);
         radar::setSweepEnabled(g_showSweep);
         radar::setAirportsEnabled(g_showAirports);
+        radar::setFiresEnabled(g_showFires);
+        radar::setTrafficMode(g_trafficMode);
+        radar::setTypeIcons(g_typeIcons);
         g_adsb.setHideGround(g_hideGround);
         g_adsb.setMinAltFt((float)g_minAltFt);
         g_adsb.setMilitaryOnly(g_milOnly);
@@ -917,7 +1388,8 @@ void setup() {
         g_rotation = display::rotation();
     }
     radar::setThemeChangedCb(saveTheme);
-    ui_set_range_cb(onRangeChange);              // on-screen zoom button
+    ui_set_range_cb(onRangeChange);              // on-screen zoom button + pinch commit
+    ui_set_range_preview_cb(onRangePreview);     // live pinch-zoom preview
     ui_set_units(g_units);                       // apply saved unit preset
     ui_set_range_km(g_settings.rangeKm);         // show the loaded range
 
@@ -932,6 +1404,8 @@ void setup() {
     if (audio_begin()) {                // ES8311 alert pings (no-op if codec absent)
         audio_set_volume(g_volume);
         audio_set_muted(g_muted);
+        audio_set_pack_for(AUDIO_NEW,   g_packNew);
+        audio_set_pack_for(AUDIO_ALERT, g_packAlert);
     }
 
     // --- Radar UI ----------------------------------------------------------
@@ -973,6 +1447,7 @@ void setup() {
     g_adsb.begin(g_settings.homeLat, g_settings.homeLon, queryKm);
     wx_radar_begin();
     cloud_image_begin();
+    map_bg_begin();
     g_ac_mutex = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(adsb_task, "adsb", 16384, nullptr, 1, nullptr, 0);  // TLS needs a big stack
 
@@ -993,6 +1468,23 @@ void setup() {
     g_web.on("/maxac", handleMaxAc);
     g_web.on("/rotate", handleRotate);
     g_web.on("/gps", handleGps);
+    g_web.on("/quiet", handleQuiet);
+    g_web.on("/fires", handleFires);
+    g_web.on("/map", handleMap);
+    g_web.on("/ais", handleAis);
+    g_web.on("/sound", HTTP_POST,
+        []() {
+            if (g_soundUploadOk) {
+                g_web.send(200, "text/plain", "ok");
+                audio_play(AUDIO_ALERT);          // play it back so the result is audible
+            } else {
+                g_web.send(400, "text/plain", wav_upload_error());
+            }
+        },
+        handleSoundUpload);
+    g_web.on("/sounddel", HTTP_POST, handleSoundDelete);
+    g_web.on("/clockfmt", handleClockFmt);
+    g_web.on("/typeicons", handleTypeIcons);
     g_web.on("/units", handleUnits);
     g_web.on("/update", HTTP_GET, handleUpdatePage);
     g_web.on("/update", HTTP_POST,
@@ -1051,6 +1543,11 @@ void loop() {
         g_cloudImageDirty = false;
         ui_on_data_updated();
     }
+    if (g_firesDirty || g_mapDirty) {
+        g_firesDirty = false;
+        g_mapDirty = false;
+        radar::update(g_snap, g_settings);   // re-project fires / bind a new basemap image
+    }
 
     // periodic: HUD clock + wifi/battery indicators
     static uint32_t lastStatus = 0;
@@ -1067,11 +1564,12 @@ void loop() {
                       (unsigned)ESP.getFreePsram(), (unsigned long)(millis() / 1000),
                       (int)g_snap.size(), fps);
 #endif
-        char clk[8] = "--:--";
+        char clk[12] = "--:--";
         struct tm ti;
         const bool haveTime = getLocalTime(&ti, 0);
         if (haveTime) {
-            snprintf(clk, sizeof(clk), "%02d:%02d", ti.tm_hour, ti.tm_min);
+            // No AM/PM in the HUD: the strip is narrow and the date sits right below it.
+            ui_format_clock(clk, sizeof(clk), ti.tm_hour, ti.tm_min, false);
             char date[20];
             strftime(date, sizeof(date), "%d %b %Y", &ti);   // e.g. "08 Jun 2026"
             ui_set_date(date);
@@ -1129,11 +1627,22 @@ void loop() {
         else if (fd == 0) fdCount = 0;              // -1 (I2C hiccup): leave the counter as-is
         const bool sleep = (fdCount >= 4);   // ~1.6 s face-down
         const bool idle  = g_idleDimMs > 0 && display::inactiveMs() > g_idleDimMs;
+        // quiet hours: on entry optionally force the clock screen; on exit return to radar
+        const bool quiet = quietWindowNow();
+        if (quiet != g_inQuiet) {
+            g_inQuiet = quiet;
+            if (g_qhMode == 3) ui_show_view(quiet ? 4 : 0);
+            applyBrightness();
+        }
         if (sleep != g_asleep || idle != g_idle) {
             g_asleep = sleep;
             g_idle = idle;
             applyBrightness();
         }
+        // while in quiet hours the touch-wake grace period expires on its own -> re-apply
+        static bool wasAwakeGrace = false;
+        const bool awakeGrace = g_inQuiet && display::inactiveMs() < 15000;
+        if (awakeGrace != wasAwakeGrace) { wasAwakeGrace = awakeGrace; applyBrightness(); }
     }
 
     delay(5);

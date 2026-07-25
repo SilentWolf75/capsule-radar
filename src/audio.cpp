@@ -6,7 +6,9 @@
 // speaker stays silent, cross-check it against the Waveshare 08_ES8311 demo — only
 // that table is board-specific, the rest is independent.
 #include "audio.h"
+#include "alert_sample.h"
 #include "config.h"
+#include <LittleFS.h>
 #include <Arduino.h>
 #include <Wire.h>
 #include "driver/i2s.h"
@@ -23,6 +25,11 @@ static const size_t S_BUF_LEN = SR / 2 * 2;   // up to 500 ms, stereo interleave
 static volatile int  s_vol = 60;     // 0..100
 static volatile bool s_muted = false;
 static volatile int  s_cue = -1;
+static volatile int  s_packs[2] = { AUDIO_PACK_CHIME, AUDIO_PACK_CHIME };  // [new, alert]
+// Uploaded sound, loaded into PSRAM. Takes precedence over the compiled-in array so a
+// user can replace the sound from the web page without rebuilding the firmware.
+static int16_t      *s_userPcm = nullptr;
+static size_t        s_userLen = 0;
 static SemaphoreHandle_t s_sem = nullptr;
 
 static void es_write(uint8_t reg, uint8_t val) {
@@ -146,6 +153,92 @@ static size_t gen_beep(int16_t *buf, size_t cap, float freq, int ms, float amp) 
     return i * 2;                                  // samples written (stereo interleaved)
 }
 
+// Synthesize a musical note: pitch glides f0 -> f1, amplitude decays exponentially,
+// and h2/h3 mix in the 2nd/3rd harmonics. That envelope is what stops it sounding like
+// a beep — a plain tone holds a flat level, a struck/plucked sound starts loud and
+// falls away. Phase is accumulated (not computed from f*i) so the glide stays smooth.
+// True peak of sin(x) + h2*sin(2x) + h3*sin(3x) over one period. Dividing by
+// (1 + h2 + h3) instead — the naive guess — assumes every harmonic peaks at the same
+// instant, which they never do. That made harmonically rich packs up to twice as quiet
+// as the plain beep, so Marimba and Aircraft-warning sounded broken rather than just
+// different. Sampling the actual waveform equalises perceived loudness across packs.
+static float wave_peak(float h2, float h3) {
+    float peak = 0.0f;
+    for (int k = 0; k < 64; ++k) {
+        const float x = 2.0f * (float)M_PI * (float)k / 64.0f;
+        const float v = fabsf(sinf(x) + h2 * sinf(2.0f * x) + h3 * sinf(3.0f * x));
+        if (v > peak) peak = v;
+    }
+    return (peak > 0.01f) ? peak : 1.0f;
+}
+
+static size_t gen_note(int16_t *buf, size_t cap, float f0, float f1, int ms,
+                       float amp, float h2, float h3, float decay) {
+    const size_t n = (size_t)((long)SR * ms / 1000);
+    if (n == 0) return 0;
+    const size_t atk = SR / 400;                  // ~2.5 ms attack (anti-click)
+    const size_t rel = SR / 300;                  // ~3 ms release to guarantee zero at the end
+    const float norm = 1.0f / wave_peak(h2, h3);
+    float phase = 0.0f;
+    size_t i = 0;
+    for (; i < n && (i * 2 + 1) < cap; ++i) {
+        const float t = (float)i / (float)n;
+        const float f = f0 + (f1 - f0) * t;
+        phase += 2.0f * (float)M_PI * f / (float)SR;
+        if (phase > 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
+
+        float env = expf(-decay * t);
+        if (i < atk)            env *= (float)i / (float)atk;
+        else if (i > n - rel)   env *= (float)(n - i) / (float)rel;
+
+        const float w = sinf(phase) + h2 * sinf(2.0f * phase) + h3 * sinf(3.0f * phase);
+        const int16_t s = (int16_t)(amp * env * norm * w);
+        buf[i * 2] = s; buf[i * 2 + 1] = s;
+    }
+    return i * 2;
+}
+
+// One note of a cue: frequency glide, length, harmonic mix, decay rate and the gap
+// that follows it. A cue is up to three of these played back to back.
+struct Note { float f0, f1; int ms; float h2, h3, decay; int gapMs; };
+
+// Sound packs. Indexed [pack][cue], cue 0 = new contact, 1 = alert.
+static const struct { Note n[6]; uint8_t count; } PACKS[AUDIO_PACK_COUNT][2] = {
+    // --- CHIME: the familiar two-tone cabin chime; alert adds a third, urgent note ---
+    { { { {784.0f, 784.0f, 190, 0.35f, 0.08f, 3.0f, 10},
+          {1047.0f, 1047.0f, 340, 0.30f, 0.06f, 2.4f, 0} }, 2 },
+      { { {1047.0f, 1047.0f, 130, 0.30f, 0.10f, 3.6f, 25},
+          {784.0f,  784.0f,  130, 0.30f, 0.10f, 3.6f, 25},
+          {1047.0f, 1047.0f, 260, 0.30f, 0.10f, 2.8f, 0} }, 3 } },
+
+    // --- SONAR: descending ping with a long tail, the classic radar echo ---
+    { { { {1150.0f, 880.0f, 380, 0.14f, 0.03f, 3.2f, 0} }, 1 },
+      { { {1400.0f, 1000.0f, 240, 0.16f, 0.04f, 3.4f, 80},
+          {1400.0f, 1000.0f, 320, 0.16f, 0.04f, 3.0f, 0} }, 2 } },
+
+    // --- PLUCK: wooden marimba note. Decay eased from 5.5 to 3.4 — at 5.5 the note was
+    // down 99% within ~80 ms, which on this speaker read as silence rather than "short".
+    { { { {880.0f, 880.0f, 320, 0.50f, 0.25f, 3.4f, 0} }, 1 },
+      { { {1174.0f, 1174.0f, 200, 0.50f, 0.25f, 3.8f, 30},
+          {1568.0f, 1568.0f, 340, 0.50f, 0.25f, 3.2f, 0} }, 2 } },
+
+    // --- WARN: cockpit master-caution character. Heavy 2nd/3rd harmonics make it buzzy
+    // rather than pure, and the near-zero decay holds each tone flat so the hi-lo warble
+    // reads as urgent. New contacts get a single short blip; only real alerts warble,
+    // otherwise every passing airliner would sound like an emergency.
+    { { { {1000.0f, 1000.0f, 220, 0.60f, 0.35f, 0.5f, 0} }, 1 },
+      { { {1000.0f, 1000.0f, 115, 0.60f, 0.40f, 0.3f, 12},
+          {750.0f,  750.0f,  115, 0.60f, 0.40f, 0.3f, 12},
+          {1000.0f, 1000.0f, 115, 0.60f, 0.40f, 0.3f, 12},
+          {750.0f,  750.0f,  115, 0.60f, 0.40f, 0.3f, 12},
+          {1000.0f, 1000.0f, 150, 0.60f, 0.40f, 0.4f, 0} }, 5 } },
+
+    // --- BEEP: the original flat tones, kept for anyone who preferred them ---
+    { { { {880.0f, 880.0f, 160, 0.0f, 0.0f, 0.0f, 0} }, 1 },
+      { { {1320.0f, 1320.0f, 80, 0.0f, 0.0f, 0.0f, 40},
+          {1320.0f, 1320.0f, 80, 0.0f, 0.0f, 0.0f, 0} }, 2 } },
+};
+
 static void play_cue(int cue) {
     if (!s_ok || !s_buf || (s_muted && cue != 2) || s_vol <= 0) return;
     int16_t *buf = s_buf;
@@ -156,15 +249,45 @@ static void play_cue(int cue) {
     if (cue == 2) {                                // self-test: ~2 s continuous tone, PA held
         size_t ns = gen_beep(buf, S_BUF_LEN, 1000.0f, 480, amp);
         for (int k = 0; k < 4; ++k) i2s_write(I2S_PORT, buf, ns * 2, &bw, portMAX_DELAY);
-    } else if (cue == AUDIO_ALERT) {
-        for (int k = 0; k < 2; ++k) {
-            size_t ns = gen_beep(buf, S_BUF_LEN, 1320.0f, 80, amp);
-            i2s_write(I2S_PORT, buf, ns * 2, &bw, portMAX_DELAY);
-            delay(40);
+    } else if (s_packs[(cue == AUDIO_ALERT) ? 1 : 0] == AUDIO_PACK_CUSTOM && audio_has_sample()) {
+        // An uploaded sound wins over the compiled-in one. Both are mono while the I2S
+        // stream is stereo, so frames are duplicated into the scratch buffer in chunks
+        // rather than keeping a stereo copy around.
+        const int16_t *pcm = s_userPcm ? s_userPcm : ALERT_SAMPLE;
+        const size_t   len = s_userPcm ? s_userLen : (size_t)ALERT_SAMPLE_LEN;
+        Serial.printf("[audio] cue=%d pack=custom(%s) sample=%u frames (%.2fs)\n",
+                      cue, s_userPcm ? "uploaded" : "built-in",
+                      (unsigned)len, len / (double)ALERT_SAMPLE_RATE);
+        const float gain = s_vol / 100.0f;
+        size_t pos = 0;
+        while (pos < len) {
+            size_t frames = len - pos;
+            if (frames > S_BUF_LEN / 2) frames = S_BUF_LEN / 2;
+            for (size_t i = 0; i < frames; ++i) {
+                const int16_t v = (int16_t)(pcm[pos + i] * gain);
+                buf[i * 2] = v; buf[i * 2 + 1] = v;
+            }
+            i2s_write(I2S_PORT, buf, frames * 2 * sizeof(int16_t), &bw, portMAX_DELAY);
+            pos += frames;
         }
     } else {
-        size_t ns = gen_beep(buf, S_BUF_LEN, 880.0f, 160, amp);
-        i2s_write(I2S_PORT, buf, ns * 2, &bw, portMAX_DELAY);
+        const int ci = (cue == AUDIO_ALERT) ? 1 : 0;
+        int pk = s_packs[ci];
+        if (pk < 0 || pk >= AUDIO_PACK_COUNT) pk = AUDIO_PACK_CHIME;
+        if (pk == AUDIO_PACK_CUSTOM) pk = AUDIO_PACK_WARN;   // no sample installed
+        const auto &seq = PACKS[pk][ci];
+        Serial.printf("[audio] cue=%d pack=%d notes=%d first=%.0fHz decay=%.1f\n",
+                      cue, pk, (int)seq.count, (double)seq.n[0].f0, (double)seq.n[0].decay);
+        for (int k = 0; k < seq.count; ++k) {
+            const Note &nt = seq.n[k];
+            size_t ns;
+            if (nt.decay <= 0.0f)   // flat tone: the original beep envelope
+                ns = gen_beep(buf, S_BUF_LEN, nt.f0, nt.ms, amp);
+            else
+                ns = gen_note(buf, S_BUF_LEN, nt.f0, nt.f1, nt.ms, amp, nt.h2, nt.h3, nt.decay);
+            i2s_write(I2S_PORT, buf, ns * 2, &bw, portMAX_DELAY);
+            if (nt.gapMs) delay(nt.gapMs);
+        }
     }
     delay(90);                                     // let the DMA clock the tail out before cutting the amp
     digitalWrite(PIN_AUDIO_PA, LOW);               // mute amp between pings (saves power, kills hiss)
@@ -214,6 +337,47 @@ bool audio_begin() {
 bool audio_present() { return s_ok; }
 void audio_set_volume(int pct) { s_vol = constrain(pct, 0, 100); }
 void audio_set_muted(bool m) { s_muted = m; }
+void audio_set_pack_for(int cue, int pack) {
+    const int c = (cue == AUDIO_ALERT) ? 1 : 0;
+    s_packs[c] = (pack >= 0 && pack < AUDIO_PACK_COUNT) ? pack : AUDIO_PACK_CHIME;
+}
+int audio_pack_for(int cue) { return s_packs[(cue == AUDIO_ALERT) ? 1 : 0]; }
+bool   audio_has_sample() { return s_userLen > 0 || ALERT_SAMPLE_LEN > 0; }
+size_t audio_sample_len() { return s_userLen > 0 ? s_userLen : (size_t)ALERT_SAMPLE_LEN; }
+
+void audio_adopt_sample(int16_t *pcm, size_t len) {
+    int16_t *old = s_userPcm;
+    s_userPcm = nullptr;          // stop playback reading it while we swap
+    s_userLen = 0;
+    if (old) heap_caps_free(old);
+    s_userPcm = pcm;
+    s_userLen = len;
+}
+
+bool audio_load_sample() {
+    if (!LittleFS.exists(AUDIO_SAMPLE_PATH)) return false;
+    File f = LittleFS.open(AUDIO_SAMPLE_PATH, "r");
+    if (!f) return false;
+    const size_t bytes = f.size();
+    if (bytes < 2 || bytes > 16000 * 2 * 8) { f.close(); return false; }   // sanity: <=8 s
+    int16_t *pcm = (int16_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+    if (!pcm) { f.close(); return false; }
+    const size_t got = f.read((uint8_t *)pcm, bytes);
+    f.close();
+    if (got != bytes) { heap_caps_free(pcm); return false; }
+    audio_adopt_sample(pcm, bytes / sizeof(int16_t));
+    Serial.printf("[audio] loaded uploaded sound: %u samples (%.2fs)\n",
+                  (unsigned)s_userLen, s_userLen / (double)ALERT_SAMPLE_RATE);
+    return true;
+}
+
+void audio_clear_sample() {
+    int16_t *old = s_userPcm;
+    s_userPcm = nullptr;
+    s_userLen = 0;
+    if (old) heap_caps_free(old);
+    LittleFS.remove(AUDIO_SAMPLE_PATH);
+}
 
 void audio_play(AudioCue cue) {
     if (!s_ok || s_muted) return;

@@ -34,15 +34,23 @@ A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75**
   - **Phosphor** — green-on-black radar scope: rings, animated sweep, aircraft glyphs rotated by heading and color-coded by altitude, fading trails, emergency halo.
   - **Orb** — green gradient + grid scope: the 7 nearest aircraft as yellow orbs emitting waves, off-range traffic as edge arrows pointing its way, orange target rings.
   - **Amber CRT** and **Military** — the same scope retinted (warm amber / night-vision green).
-- **Touch** (CST9217): tap an aircraft → detail card (callsign, type, altitude, vertical speed, ground speed, distance, heading, squawk, and **origin → destination** looked up from adsbdb, cached in NVS). **Double-tap** to cycle zoom range. Swipe between **Radar / List / Stats** (circular layouts).
-- **Boot splash** + **alert pings** (ES8311 speaker): a soft ping when a new aircraft enters range, an urgent double-beep for emergency/military — volume & mute on the web page.
+- **Touch** (CST9217): tap an aircraft → detail card (callsign, type, altitude, vertical speed, ground speed, distance, heading, squawk, **airline logo/name**, and **origin → destination** looked up from adsbdb, cached in NVS). **Double-tap** to cycle zoom range, or **pinch with two fingers** to zoom continuously. Swipe between **Radar / List / Stats / Weather / Tracked / Clock** (circular layouts).
+- **Tracked flight**: press **TRACK** on any aircraft's card to follow it — the Tracked view shows its route, a **progress bar** along the great circle, distance remaining and **ETA** from its ground speed. A tracked contact is pinned, so the on-screen aircraft cap never drops it as it flies away.
+- **Map background** (optional): dark or light [CARTO](https://carto.com/attribution/) basemap tiles under the scope, resampled through the radar's own projection so coastlines and roads line up with the range rings at every zoom. Tiles download one at a time so the live feed never stalls.
+- **Aircraft icons by type**: the ICAO type code picks a silhouette — swept-wing jets in three sizes, straight-wing props, helicopters (with a rotor disc), fighters and gliders — all rotated by track. Falls back to the generic glyph for unknown types, and the whole thing can be switched off.
+- **Marine traffic** (optional, needs a free [aisstream.io](https://aisstream.io) key): switch the scope from **Aircraft** to **Marine vessels** and it plots AIS contacts as cyan hulls oriented by course, with ship names; tap one for a card with MMSI, speed over ground, course, distance and bearing. The two are separate pictures rather than one overlay, and the list view follows the setting.
+- **12- or 24-hour clock**: applies to the HUD, the clock face and the weather-imagery timestamps.
+- **Wildfire markers** (optional, needs a free [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/) key): active fire detections plotted on the scope, sized and coloured by fire radiative power.
+- **Clock view**: a full watch face with day/date, current conditions and a three-day strip — the natural thing to leave on screen overnight.
+- **Quiet hours**: a configurable window that dims the screen, switches it off, or forces the clock view; a touch wakes it for 15 seconds.
+- **Boot splash** + **alert sounds** (ES8311 speaker): a soft cue when a new aircraft enters range, an urgent one for emergency/military. Choose between **Chime, Sonar ping, Marimba, Aircraft warning, Beep**, or **upload your own WAV from the config page** — it's converted on the device (stereo downmixed, any 8–48 kHz rate resampled to 16 kHz, volume normalised) and stored in flash, so it survives reboots without rebuilding. Volume, mute and per-cue test buttons on the web page.
 - **Smooth motion**: aircraft glyphs glide between polls (interpolated) instead of jumping, using cheap partial redraws.
 - **Top HUD**: WiFi status (amber if the data feed is failing), in-range aircraft count, NTP/RTC clock, **battery %** (charging bolt, red when low), and the date. The Stats view footer shows how to reach the config page (`capsuleradar.local` + IP).
 - **Battery aware** (AXP2101): shows charge level, warns when low, and slows the feed poll rate on battery to save power.
 - **Real-time clock** (PCF85063): keeps the time/date across power loss, so the clock is right even before/without WiFi; re-synced from NTP when online.
 - **Smart brightness**: configurable idle auto-dim (no touch), and **face-down sleep** (QMI8658 IMU — flip it over to turn the screen off).
 - **GPS auto-location** (optional **-G** board variant): the Waveshare `-G` board has an onboard GPS (Quectel LC76G). Turn it on from the web page and the radar **sets its own center point automatically**, with an on-screen **satellite status icon** (amber while acquiring, green once it has a fix). Standard boards simply enter their location manually.
-- **Configuration web page** at `http://capsuleradar.local/` — center point (map picker), display range, theme, **time zone** (auto-detected from your browser), live brightness slider, sound, WiFi reset, and over-the-air firmware update. Settings persist in NVS.
+- **Configuration web page** at `http://capsuleradar.local/` — center point (map picker), display range, theme, **time zone** (auto-detected from your browser), live brightness slider, map background, marine/wildfire layers and their API keys, quiet hours, sound, WiFi reset, and over-the-air firmware update. Settings persist in NVS.
 - **First-boot WiFi setup** via a captive portal (`CapsuleRadar-Setup`).
 
 ## Hardware
@@ -92,8 +100,13 @@ src/
   main.cpp           tasks, WiFi/NTP, web config, brightness/IMU glue
   display.*          CO5300 (Arduino_GFX) + LVGL bring-up
   radar_view.*       the radar scope, aircraft, themes
-  ui.*               views (radar/list/stats) + detail card + HUD
-  touch_cst9217.*    capacitive touch driver
+  aircraft_types.*   ICAO type designator -> drawing silhouette
+  ui.*               views (radar/list/stats/weather/tracked/clock) + cards + HUD
+  touch_cst9217.*    capacitive touch driver (single touch + 2-point pinch)
+  map_bg.* map_client.*    CARTO basemap: tile fetch, stitch, reproject to the scope
+  vessel.* ais_client.*    AIS marine traffic (aisstream.io WebSocket)
+  wildfire.* wildfire_client.*  NASA FIRMS active-fire markers
+  airline.* airline_client.*    operator name (offline table) + logo download
   imu_qmi8658.*      accelerometer (face-down sleep)
   battery.*          AXP2101 battery gauge
   rtc_pcf85063.*     PCF85063 real-time clock
@@ -112,4 +125,4 @@ docs/                hardware / data-source / architecture notes
 
 ## Data & license
 
-**Firmware / code: [MIT](LICENSE)** — fork and build on it freely (keep the notice). Aircraft data: **airplanes.live** (free, **non-commercial / educational** — exactly this project; be polite with request cadence). Routes: **adsbdb.com** (free). Personal/hobby project. The 3D-printed enclosure is published on [MakerWorld](https://makerworld.com/en/models/2907695-capsule-radar-live-flight-radar-desk-gadget) (enclosure + this firmware).
+**Firmware / code: [MIT](LICENSE)** — fork and build on it freely (keep the notice). Aircraft data: **airplanes.live** (free, **non-commercial / educational** — exactly this project; be polite with request cadence). Routes: **adsbdb.com** (free). Basemap tiles: **CARTO** / **OpenStreetMap** contributors. Marine AIS: **aisstream.io** (own key). Active fires: **NASA FIRMS** (own key). Airline logos are fetched on demand and remain the property of their respective owners. Personal/hobby project. The 3D-printed enclosure is published on [MakerWorld](https://makerworld.com/en/models/2907695-capsule-radar-live-flight-radar-desk-gadget) (enclosure + this firmware).

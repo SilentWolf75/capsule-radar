@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.3.23"   // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.6.3"    // shown on the web config page + Stats screen; bump on release
 // Edit pins below: replace every -1 with the value from the Waveshare factory demo
 // (see docs/HARDWARE.md and docs/SETUP.md). Do NOT guess them.
 
@@ -29,6 +29,7 @@ static const float RANGE_STEPS_KM[] = {10.0f, 20.0f, 30.0f, 50.0f, 100.0f};
 #define WEATHER_REFRESH_MS  1800000UL      // 30 minutes; forecast data changes slowly
 #define WX_RADAR_REFRESH_MS 300000UL       // RainViewer frames update about every 5 minutes
 #define CLOUD_IMAGE_REFRESH_MS 600000UL    // EUMETSAT MTG cloud imagery; cache for 10 minutes
+#define FIRE_REFRESH_MS     900000UL       // NASA FIRMS active fires; new satellite passes are hours apart
 
 // ---------- Screen (CO5300 AMOLED) ----------
 #define SCREEN_W            466

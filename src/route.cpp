@@ -10,6 +10,7 @@ static char s_want[12]     = "";   // callsign the UI asked about
 static char s_doneCall[12] = "";   // callsign the stored result belongs to
 static char s_from[40]     = "";
 static char s_to[40]       = "";
+static RouteCoords s_coords;
 
 void route_request(const char *callsign) {
     std::lock_guard<std::mutex> g(s_m);
@@ -60,10 +61,25 @@ static void ascii_fold(const char *in, char *out, size_t n) {
 }
 
 void route_store(const char *callsign, const char *from, const char *to) {
+    route_store_full(callsign, from, to, RouteCoords{});
+}
+
+void route_store_full(const char *callsign, const char *from, const char *to,
+                      const RouteCoords &coords) {
     std::lock_guard<std::mutex> g(s_m);
     snprintf(s_doneCall, sizeof(s_doneCall), "%s", callsign ? callsign : "");
     ascii_fold(from, s_from, sizeof(s_from));
     ascii_fold(to,   s_to,   sizeof(s_to));
+    s_coords = coords;
+}
+
+bool route_get_coords(const char *callsign, RouteCoords &out) {
+    std::lock_guard<std::mutex> g(s_m);
+    if (callsign && s_doneCall[0] && strcmp(callsign, s_doneCall) == 0 && s_coords.valid) {
+        out = s_coords;
+        return true;
+    }
+    return false;
 }
 
 bool route_get(const char *callsign, char *from, size_t fn, char *to, size_t tn) {

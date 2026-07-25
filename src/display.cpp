@@ -199,10 +199,19 @@ static void rounder_cb(lv_disp_drv_t *drv, lv_area_t *area) {
 }
 
 // CST9217 touch -> LVGL pointer. LVGL keeps the last point on release.
+// Two-finger contact is routed to the UI pinch handler (range zoom) and reported to
+// LVGL as "released" so a pinch never doubles as a tap/scroll.
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     (void)drv;
-    uint16_t x, y;
-    if (touch_read(&x, &y)) {
+    uint16_t xs[2] = {0, 0}, ys[2] = {0, 0};
+    const int n = touch_read_points(xs, ys);
+    ui_pinch_touch(n, xs[0], ys[0], xs[1], ys[1]);   // pinch state machine (portable, in ui.cpp)
+    if (n >= 2) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+    uint16_t x = xs[0], y = ys[0];
+    if (n == 1) {
         int lx = x, ly = y;                              // physical touch -> logical (inverse rotation)
         const uint16_t angle = s_rot;
         switch (angle) {
