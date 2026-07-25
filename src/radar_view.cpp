@@ -96,6 +96,7 @@ static bool       s_firesEnabled    = true;
 static int        s_trafficMode     = radar::TRAFFIC_AIR;
 static bool       s_typeIcons       = true;   // per-type silhouettes vs the plain dart
 static int        s_maxOnScreen     = 20;          // how many (nearest) aircraft to draw (web-configurable)
+static bool       s_bigText         = false;       // accessibility: bigger glyph labels (set before init)
 static int        s_trailMax        = TRAIL_MAX;   // per-aircraft trail length (0 = off)
 static int        s_flowMax         = FLOW_MAX;    // persistent flow-layer segments, count cap (0 = off)
 static int        s_flowGenMax      = 14;          // ...and an age cap in polls (~2 s each) so tracks fade out
@@ -405,11 +406,12 @@ static void wedge_bbox(float deg, lv_area_t *out) {
     out->x2 = maxx + pad; out->y2 = maxy + pad;
 }
 
-// glyph + label bounding box (for partial invalidation during the glide)
+// glyph + label bounding box (for partial invalidation during the glide).
+// Must cover the label areas drawn in the aircraft layer (they grew for large-text mode).
 static inline lv_area_t glyph_bbox(lv_point_t p) {
     lv_area_t a;
     if (orb()) { a.x1 = p.x - 30; a.y1 = p.y - 30; a.x2 = p.x + 30;  a.y2 = p.y + 30; }
-    else          { a.x1 = p.x - 22; a.y1 = p.y - 22; a.x2 = p.x + 148; a.y2 = p.y + 26; }
+    else          { a.x1 = p.x - 22; a.y1 = p.y - 22; a.x2 = p.x + 174; a.y2 = p.y + 32; }
     return a;
 }
 static inline void area_union(lv_area_t &d, const lv_area_t &s) {
@@ -669,16 +671,16 @@ static void ac_draw_cb(lv_event_t *e) {
         if (!drg) {
             lv_draw_label_dsc_t lc;
             lv_draw_label_dsc_init(&lc);
-            lc.font = &lv_font_montserrat_14;
+            lc.font = s_bigText ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
             lc.color = s_cInk;
             lv_area_t a1 = { (lv_coord_t)(ac.pos.x + 12), (lv_coord_t)(ac.pos.y - 14),
-                             (lv_coord_t)(ac.pos.x + 142), (lv_coord_t)(ac.pos.y + 2) };
+                             (lv_coord_t)(ac.pos.x + 168), (lv_coord_t)(ac.pos.y + 4) };
             if (ac.call[0]) lv_draw_label(d, &lc, &a1, ac.call, NULL);
             lv_draw_label_dsc_t la;
             lv_draw_label_dsc_init(&la);
-            la.font = &lv_font_montserrat_12;
+            la.font = s_bigText ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
             la.color = ac.color;
-            lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 2), a1.x2, (lv_coord_t)(ac.pos.y + 20) };
+            lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 4), a1.x2, (lv_coord_t)(ac.pos.y + 26) };
             if (ac.altTxt[0]) lv_draw_label(d, &la, &a2, ac.altTxt, NULL);
         }
     }
@@ -816,6 +818,11 @@ void setTrailLength(int level) {
 
 void setMaxOnScreen(int n) {
     s_maxOnScreen = (n < 1) ? 1 : (n > ADSB_MAX_AIRCRAFT ? ADSB_MAX_AIRCRAFT : n);  // never more than the feed pulls
+    if (s_acLayer) lv_obj_invalidate(s_acLayer);
+}
+
+void setLargeText(bool on) {
+    s_bigText = on;
     if (s_acLayer) lv_obj_invalidate(s_acLayer);
 }
 

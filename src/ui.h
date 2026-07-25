@@ -21,4 +21,5 @@ bool ui_time_24h(void);
 // Shared clock formatter so the HUD, the clock face and the imagery timestamps agree.
 // `withSuffix` appends " AM"/" PM" in 12-hour mode (skip it where space is tight).
 void ui_format_clock(char *buf, size_t n, int hour, int min, bool withSuffix);
+void ui_set_large_text(bool on);             // accessibility: bigger fonts everywhere. Call BEFORE ui_create()
 void ui_set_weather_forecast(bool forecast); // false = WX radar, true = 3-day forecast
