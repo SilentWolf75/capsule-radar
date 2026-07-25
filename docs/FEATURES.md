@@ -103,6 +103,26 @@ need a third-party account are off until a key is entered on the config page.
     Rejections name the actual problem ("need 16-bit WAV", "compressed WAV",
     "sample rate must be 8-48 kHz") rather than failing generically.
 
+## Airport markers
+The embedded list (`tools/gen_airports.py` -> `src/airports_data.h`) keeps every airport
+carrying an IATA code, plus all large airports: 8,802 entries, ~129 KB.
+
+Two details are easy to get wrong and were:
+- **Small airports must be included.** OurAirports classes plenty of real, busy GA fields
+  as `small_airport` - New Century AirCenter (KIXD) among them - so filtering by type
+  alone silently drops the airport nearest a lot of users. Requiring an IATA code is what
+  keeps the file small while admitting these; it excludes ~38,000 unnamed strips,
+  heliports and closed sites.
+- **Label with the identifier people actually use.** Airline airports are known by IATA
+  (MCI, not KMCI); GA fields are known by their ICAO/FAA ident (KIXD - its IATA code,
+  JCI, is one almost nobody would recognise). The generator picks per airport class.
+
+Positions are `int32` degrees x 10,000 (~11 m). The previous `int16` x 100 encoding
+quantised to ~1.1 km, invisible at a 100 km range but badly wrong for a field 3 km away
+on a zoomed-in scope. Labels are drawn for every airport when 14 or fewer are on screen
+and for large ones only beyond that, so a zoomed-in view names the local field without
+turning a wide view into a wall of text.
+
 ## Render performance (and one instructive failure)
 The sweep is the most expensive element on screen: every frame redraws a fan of wide
 anti-aliased alpha lines *and* forces every layer beneath it (basemap, flow canvas,

@@ -701,7 +701,7 @@ static void build_weather(void) {
         lv_obj_clear_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(s_wxCanvas);
-        char iata[4]; float d = 0, b = 0;
+        char iata[6]; float d = 0, b = 0;
         if (airports_nearest_iata(rlat, rlon, 200.0f, iata, &d, &b)) {
             char apt[64];
             snprintf(apt, sizeof(apt), "O  %s   %.0f %s %s", iata, dist_val(d), dist_unit(), cardinal(b));
