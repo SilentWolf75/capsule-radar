@@ -43,7 +43,7 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32-s3-amoled-175
 
-      - name: Merge into a single flashable binary
+      - name: Stage the flashable images
         run: |
           B=.pio/build/esp32-s3-amoled-175
           BOOT_APP0="$(find "$HOME/.platformio/packages" -name boot_app0.bin -path '*framework-arduinoespressif32*' | head -1)"
@@ -52,6 +52,20 @@ jobs:
           # stamp the flasher page + manifest with the firmware version being built
           VER=$(grep -oE 'FW_VERSION "[0-9.]+"' src/config.h | grep -oE '[0-9.]+' | head -1)
           sed -i "s/__FWVER__/${VER:-dev}/g" site/index.html site/manifest.json
+
+          # Publish the four images SEPARATELY rather than one merged blob.
+          #
+          # merge_bin emits a single contiguous image from 0x0 and pads the gaps between
+          # segments with 0xFF. NVS lives at 0x9000-0xe000, right in the gap between the
+          # partition table (0x8000) and boot_app0 (0xe000) - so flashing a merged image
+          # silently wiped WiFi credentials and every setting even when the user did NOT
+          # ask to erase. Listing the parts makes ESP Web Tools write only those regions
+          # and leave NVS (and the LittleFS partition) alone.
+          cp "$B/bootloader.bin" "$B/partitions.bin" "$B/firmware.bin" site/
+          cp "$BOOT_APP0" site/boot_app0.bin
+
+          # A merged image is still handy for esptool users and the release page, so keep
+          # producing one - it is simply not what the browser flasher writes.
           python -m esptool --chip esp32s3 merge_bin -o site/CapsuleRadar-esp32s3.bin \
             --flash_mode dio --flash_freq 80m --flash_size 16MB \
             0x0     "$B/bootloader.bin" \

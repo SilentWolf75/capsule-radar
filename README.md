@@ -98,11 +98,14 @@ Flash without installing anything using **ESP Web Tools** (Chrome or Edge on des
 1. Open the **[web flasher](https://silentwolf75.github.io/capsule-radar/)**.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
 
-> ⚠️ **A web flash erases the whole chip**, including your saved WiFi credentials,
-> settings and any alert sound you uploaded. That's what makes it reliable for a first
-> install or a recovery, but it's the wrong tool for a routine update. To keep your
-> settings, update over WiFi instead: open `capsuleradar.local/update` and upload
-> `firmware.bin`, or run `pio run -e esp32-s3-amoled-175-ota -t upload`.
+> Leave **Erase device** unticked to keep your WiFi credentials, settings and uploaded
+> alert sound; tick it for a clean install or to recover a confused device. Updating over
+> WiFi preserves everything too and needs no cable: open `capsuleradar.local/update` and
+> upload `firmware.bin`, or run `pio run -e esp32-s3-amoled-175-ota -t upload`.
+>
+> *(Before v1.8.2 the flasher wrote one merged image starting at `0x0`, whose `0xFF`
+> padding covered the NVS region at `0x9000`. That wiped settings on every web flash
+> regardless of the erase checkbox. It now writes the four images to their own offsets.)*
 
 The flasher is built and published automatically by GitHub Actions
 ([`.github/workflows/webflasher.yml`](.github/workflows/webflasher.yml)) on every push to
