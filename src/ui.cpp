@@ -148,6 +148,13 @@ static float dist_val(float km) {
     return km;                                   // Metric   -> km
 }
 static const char *dist_unit(void) { return s_units == 0 ? "nm" : (s_units == 2 ? "mi" : "km"); }
+// The weather view's overlays are set in caps to match the aviation-style chrome.
+static const char *dist_unit_caps(void) { return s_units == 0 ? "NM" : (s_units == 2 ? "MI" : "KM"); }
+
+// Coverage radius of each imagery product. These are properties of the source data
+// (RainViewer tile span, EUMETSAT crop), so they live in km and convert for display.
+#define WX_RADAR_RANGE_KM   75.0f
+#define WX_CLOUD_RANGE_KM  200.0f
 
 static float weather_temp(float c) { return s_units == 2 ? c * 1.8f + 32.0f : c; }
 static const char *weather_temp_unit(void) { return s_units == 2 ? "F" : "C"; }
@@ -785,7 +792,10 @@ static void build_weather(void) {
     }
     if (!forecastMode && haveImage) lv_obj_add_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
     if (!forecastMode && !haveImage) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(s_wxRange, cloudMode ? "200 KM" : "75 KM");
+    char wxRng[16];
+    snprintf(wxRng, sizeof(wxRng), "%.0f %s",
+             dist_val(cloudMode ? WX_CLOUD_RANGE_KM : WX_RADAR_RANGE_KM), dist_unit_caps());
+    lv_label_set_text(s_wxRange, wxRng);
     lv_label_set_text(s_weatherModeLbl,
         s_weatherMode == WEATHER_RADAR ? "CLOUDS" :
         s_weatherMode == WEATHER_CLOUDS ? "3-DAY FORECAST" : "WX RADAR");
@@ -1279,7 +1289,7 @@ void ui_create(void) {
     lv_obj_clear_flag(s_zoomBtn, LV_OBJ_FLAG_SCROLL_CHAIN);  // tapping it must not swipe the tileview
     lv_obj_add_event_cb(s_zoomBtn, zoom_cb, LV_EVENT_PRESSED, NULL);  // fire on touch-down, not release
     s_zoomLbl = lv_label_create(s_zoomBtn);
-    lv_label_set_text(s_zoomLbl, LV_SYMBOL_LOOP " 30 km");
+    lv_label_set_text(s_zoomLbl, LV_SYMBOL_LOOP " --");   // replaced by ui_set_range_km()
     lv_obj_set_style_text_font(s_zoomLbl, F14(), 0);
     lv_obj_set_style_text_color(s_zoomLbl, UI_GREEN, 0);
     lv_obj_center(s_zoomLbl);
@@ -1465,7 +1475,7 @@ void ui_create(void) {
     s_wxRange = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxRange, F12(), 0);
     lv_obj_set_style_text_color(s_wxRange, UI_GREEN, 0);
-    lv_label_set_text(s_wxRange, "75 KM");
+    lv_label_set_text(s_wxRange, "");            // filled by build_weather() in the chosen unit
     lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, 128, 225);
 
     s_wxFooter = lv_label_create(wp);

@@ -1125,6 +1125,9 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
 
     if (s_rangeLbl) {                                 // keep the range label in sync with settings
         char r[16];
+        // NOTE: hardcoded km. This label is hidden (setRangeLabelVisible(false) — the
+        // zoom button shows the range instead), so it never reaches the screen. Anything
+        // re-enabling it must convert to the user's unit first, as ui.cpp does.
         snprintf(r, sizeof(r), "%.0f km", (double)s.rangeKm);
         lv_label_set_text(s_rangeLbl, r);
     }
