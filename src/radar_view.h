@@ -33,6 +33,7 @@ struct AcInfo {
     float bearingDeg;
     int   squawk;       // -1 if unknown
     bool  emergency;
+    bool  military;   // feed dbFlags bit 0
 };
 
 namespace radar {
@@ -77,6 +78,7 @@ bool firesEnabled();
 enum TrafficMode { TRAFFIC_AIR = 0, TRAFFIC_MARINE = 1 };
 void setTrafficMode(int mode);
 int  trafficMode();
+void setMilitaryPreview(bool on);                // diagnostic: mark every contact military
 void setTypeIcons(bool on);                      // per-type silhouettes vs one generic glyph
 bool typeIcons();
 void setTrailLength(int level);                  // 0=off 1=short 2=medium 3=long (aircraft trails + flow)

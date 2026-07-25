@@ -5,6 +5,8 @@
 #include "route.h"
 
 // `coords` may be null when the caller only needs the labels.
+bool reg_fetch(const char *hex, char *reg, size_t rn, char *type, size_t tn);
+
 bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t tn,
                  RouteCoords *coords = nullptr);
 

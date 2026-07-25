@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 #include <string.h>
 #include <time.h>   // route-cache TTL
 
@@ -181,4 +182,52 @@ bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t t
         }
     }
     return (from[0] || to[0]);
+}
+
+// Registration + type from adsbdb's aircraft endpoint: GET /v0/aircraft/{hex}.
+// Same host and no API key, so it costs one more short request when a contact is tapped.
+bool reg_fetch(const char *hex, char *reg, size_t rn, char *type, size_t tn) {
+    if (rn) reg[0] = 0;
+    if (tn) type[0] = 0;
+    if (!hex || !hex[0] || WiFi.status() != WL_CONNECTED) return false;
+    // Tapping a contact now fires four sequential HTTPS lookups (route, photo, logo,
+    // registration) and each TLS handshake wants a contiguous internal block. This is
+    // the least important of the four, so it yields first when memory is tight.
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 28000) return false;
+
+    char url[96];
+    snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/aircraft/%s", hex);
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.setReuse(false);
+    http.setConnectTimeout(3000);      // shares the feed task; keep it short
+    http.setTimeout(6000);
+    if (!http.begin(client, url)) return false;
+    http.addHeader("User-Agent", ADSB_USER_AGENT);
+
+    const int code = http.GET();
+    if (code != 200) { http.end(); return false; }
+
+    JsonDocument filter;
+    filter["response"]["aircraft"]["registration"] = true;
+    filter["response"]["aircraft"]["type"] = true;
+    filter["response"]["aircraft"]["icao_type"] = true;
+
+    JsonDocument doc;
+    const DeserializationError err = deserializeJson(doc, http.getStream(),
+                                                     DeserializationOption::Filter(filter));
+    http.end();
+    if (err) return false;
+
+    JsonObjectConst ac = doc["response"]["aircraft"].as<JsonObjectConst>();
+    if (ac.isNull()) return false;                       // unknown airframe
+    snprintf(reg, rn, "%s", (const char *)(ac["registration"] | ""));
+    // Prefer the ICAO designator ("G650") over the long marketing name ("G650 ER"):
+    // it matches what the live feed puts in `t`, and the card's title row is narrow.
+    const char *icaoTy = ac["icao_type"] | "";
+    const char *longTy = ac["type"] | "";
+    snprintf(type, tn, "%s", icaoTy[0] ? icaoTy : longTy);
+    return (reg[0] || type[0]);
 }

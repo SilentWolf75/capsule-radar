@@ -27,6 +27,7 @@
 #define UI_DIM   lv_color_hex(0x5F7A6C)
 #define UI_PANEL lv_color_hex(0x0C160F)
 #define UI_EMERG lv_color_hex(0xFF5A3C)
+#define UI_MIL   lv_color_hex(0xC77DFF)   // matches the scope's military brackets
 
 static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
@@ -44,6 +45,13 @@ static lv_obj_t *s_clockDay[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_clockDayTemp[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_clockIcon = nullptr, *s_clockDayIcon[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_fcIcon = nullptr, *s_fcDayIcon[3] = { nullptr, nullptr, nullptr };
+static int s_iconPreview = -1;    // >=0 pins every weather glyph to this WMO code
+
+// All weather glyphs go through here so the diagnostic override applies uniformly.
+static void build_clock_weather(void);   // defined with the clock tile, below
+static void set_wx_icon(lv_obj_t *o, int code, bool night) {
+    weather_icon_set(o, s_iconPreview >= 0 ? s_iconPreview : code, night);
+}
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
 static lv_obj_t *s_cardLogo = nullptr, *s_cardAirline = nullptr;
@@ -237,12 +245,26 @@ static void refresh_card(void) {
         s_vesselShown = false;
     }
 
-    char title[40];
-    if (in.type[0]) snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : "-", in.type);
-    else            snprintf(title, sizeof(title), "%s", in.call[0] ? in.call : "-");
+    // Registration is worth more than the squawk for spotting, so it goes in the title
+    // row next to the callsign once the lookup lands.
+    if (in.hex[0]) reg_request(in.hex);
+    char reg[12] = "", regType[24] = "";
+    const bool haveReg = in.hex[0] && reg_get(in.hex, reg, sizeof(reg), regType, sizeof(regType));
+
+    char title[64];
+    const char *typeStr = in.type[0] ? in.type : (haveReg && regType[0] ? regType : "");
+    if (haveReg && reg[0] && typeStr[0])
+        snprintf(title, sizeof(title), "%s  %s  %s", in.call[0] ? in.call : "-", reg, typeStr);
+    else if (haveReg && reg[0])
+        snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : "-", reg);
+    else if (typeStr[0])
+        snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : "-", typeStr);
+    else
+        snprintf(title, sizeof(title), "%s", in.call[0] ? in.call : "-");
     fold_ascii(title);
     lv_label_set_text(s_cardTitle, title);
-    lv_obj_set_style_text_color(s_cardTitle, in.emergency ? UI_EMERG : UI_INK, 0);
+    lv_obj_set_style_text_color(s_cardTitle,
+        in.emergency ? UI_EMERG : (in.military ? UI_MIL : UI_INK), 0);
 
     char altS[16], vsS[24], spdS[16], sqS[16];
     fmt_alt(altS, sizeof(altS), in.altFt, in.onGround);
@@ -253,7 +275,8 @@ static void refresh_card(void) {
 
     char left[96], right[96];
     snprintf(left,  sizeof(left),  "ALT  %s\nSPD  %s\nDIST %.1f %s", altS, spdS, dist_val(in.distKm), dist_unit());
-    snprintf(right, sizeof(right), "V/S  %s\nHDG  %03.0f\nSQK  %s", vsS, in.bearingDeg, sqS);
+    snprintf(right, sizeof(right), "V/S  %s\nHDG  %03.0f\nSQK  %s%s", vsS, in.bearingDeg, sqS,
+             in.military ? "  MIL" : "");
     lv_label_set_text(s_cardL, left);
     lv_label_set_text(s_cardR, right);
 
@@ -589,7 +612,7 @@ static void build_list(void) {
                  in.call[0] ? in.call : in.hex, altS, dist_val(in.distKm), dist_unit());
         lv_obj_t *b = lv_list_add_btn(s_list, NULL, txt);
         lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(b, in.emergency ? UI_EMERG : UI_SOFT, 0);
+        lv_obj_set_style_text_color(b, in.emergency ? UI_EMERG : (in.military ? UI_MIL : UI_SOFT), 0);
         lv_obj_set_style_text_font(b, F16(), 0);
         lv_obj_set_user_data(b, (void *)(intptr_t)i);
         lv_obj_add_event_cb(b, list_btn_cb, LV_EVENT_CLICKED, NULL);
@@ -664,7 +687,7 @@ static void build_weather(void) {
         snprintf(current, sizeof(current), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
         lv_label_set_text(s_fcCurrent, current);
         lv_label_set_text(s_fcCondition, weather_condition(w.code));
-        weather_icon_set(s_fcIcon, w.code, is_night());
+        set_wx_icon(s_fcIcon, w.code, is_night());
         lv_label_set_text(s_fcMetricValue[0], current);
         char hum[16]; snprintf(hum, sizeof(hum), "%d%%", w.humidity);
         lv_label_set_text(s_fcMetricValue[1], hum);
@@ -689,7 +712,7 @@ static void build_weather(void) {
             if (i < w.dayCount) {
                 lv_label_set_text(s_fcDay[col], weather_day_name(w.days[i].date));
                 lv_label_set_text(s_fcDayCondition[col], weather_condition(w.days[i].code));
-                weather_icon_set(s_fcDayIcon[col], w.days[i].code, false);
+                set_wx_icon(s_fcDayIcon[col], w.days[i].code, false);
                 char temps[28];
                 snprintf(temps, sizeof(temps), "%.0f / %.0f %s",
                          weather_temp(w.days[i].tempMaxC), weather_temp(w.days[i].tempMinC), weather_temp_unit());
@@ -797,6 +820,17 @@ void ui_set_weather_mode(int mode) {
     if (mode < 0 || mode > 2) return;
     s_weatherMode = (WeatherViewMode)mode;
     build_weather();
+}
+
+// Force every weather glyph to one WMO code, so the whole icon set can be eyeballed
+// without waiting for the weather to oblige (a Kansas summer is not going to supply
+// snow on demand). It has to be a latch rather than a one-shot: build_weather() runs on
+// every poll and would otherwise paint the real code back within two seconds.
+// /view?icon=-1 returns to live data.
+void ui_preview_weather_icon(int code) {
+    s_iconPreview = (code < 0) ? -1 : code;
+    build_weather();
+    build_clock_weather();
 }
 
 // ---------------------------------------------------------------- tracked tile
@@ -944,7 +978,7 @@ static void build_clock_weather(void) {
     snprintf(t, sizeof(t), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
     lv_label_set_text(s_clockTemp, t);
     lv_label_set_text(s_clockCond, weather_condition(w.code));
-    weather_icon_set(s_clockIcon, w.code, is_night());
+    set_wx_icon(s_clockIcon, w.code, is_night());
     for (int col = 0; col < 3; ++col) {
         const int i = col + 1;
         if (i < w.dayCount) {
@@ -953,7 +987,7 @@ static void build_clock_weather(void) {
             snprintf(d, sizeof(d), "%.0f/%.0f", weather_temp(w.days[i].tempMaxC),
                      weather_temp(w.days[i].tempMinC));
             lv_label_set_text(s_clockDayTemp[col], d);
-            weather_icon_set(s_clockDayIcon[col], w.days[i].code, false);  // daily = daytime
+            set_wx_icon(s_clockDayIcon[col], w.days[i].code, false);   // daily = daytime
         } else {
             lv_label_set_text(s_clockDay[col], "");
             lv_label_set_text(s_clockDayTemp[col], "");

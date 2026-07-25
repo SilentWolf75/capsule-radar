@@ -123,6 +123,19 @@ on a zoomed-in scope. Labels are drawn for every airport when 14 or fewer are on
 and for large ones only beyond that, so a zoomed-in view names the local field without
 turning a wide view into a wall of text.
 
+## Military contacts
+The feed's `dbFlags` bit 0 marks military airframes. It reaches the audio alerts and the
+feed filter, and now the display too: four violet corner brackets around the glyph, a
+violet callsign in the list, and a `MIL` tag on the detail card. Violet because the
+altitude ramp already owns red/amber/lime/green/cyan and the emergency halo owns red;
+brackets rather than a ring so the two can never be confused at a glance.
+
+Military traffic is rare enough that the marker would otherwise go unchecked until one
+happened to fly past, so `/view?mil=1` draws every contact as military for inspection.
+`/view?icon=N` does the same for the weather glyph set (a Kansas summer will not supply
+snow on demand) - it has to latch, since `build_weather()` repaints from live data every
+poll and would otherwise undo the override within two seconds.
+
 ## Render performance (and one instructive failure)
 The sweep is the most expensive element on screen: every frame redraws a fan of wide
 anti-aliased alpha lines *and* forces every layer beneath it (basemap, flow canvas,

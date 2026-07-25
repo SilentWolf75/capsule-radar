@@ -61,6 +61,9 @@ static const TypeRule TYPE_RULES[] = {
     // ---- turboprops (several must precede the light-aircraft prefixes) ----
     {"C208", AC_CAT_TURBOPROP}, {"C212", AC_CAT_TURBOPROP}, {"C441", AC_CAT_TURBOPROP},
     {"C295", AC_CAT_TURBOPROP}, {"C130", AC_CAT_TURBOPROP}, {"C27J", AC_CAT_TURBOPROP},
+    // C-130J reports as C30J, not C130. Without this it falls past every turboprop rule
+    // and is caught by "C3" (Cessna 310/340) further below - a Hercules as a light twin.
+    {"C30J", AC_CAT_TURBOPROP}, {"C130J", AC_CAT_TURBOPROP},
     {"C160", AC_CAT_TURBOPROP}, {"CN35", AC_CAT_TURBOPROP},
     {"AT4",  AC_CAT_TURBOPROP}, {"AT5",  AC_CAT_TURBOPROP}, {"AT7",  AC_CAT_TURBOPROP},
     {"DH8",  AC_CAT_TURBOPROP}, {"DHC6", AC_CAT_TURBOPROP}, {"DH6",  AC_CAT_TURBOPROP},

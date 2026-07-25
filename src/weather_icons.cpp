@@ -86,7 +86,10 @@ static void icon_draw_cb(lv_event_t *e) {
     const uint32_t packed = (uint32_t)(uintptr_t)lv_obj_get_user_data(o);
     const int code = (int)(packed & 0xFFFF);
     const bool night = (packed & 0x10000) != 0;
-    if (code < 0) return;
+    // 0xFFFF is the "nothing to show" sentinel. Testing `code < 0` did not work: the
+    // mask makes it 65535, which then fell through to the default cloud, so a slot with
+    // no data drew a cloud instead of staying empty.
+    if (code == 0xFFFF) return;
 
     lv_area_t box;
     lv_obj_get_coords(o, &box);

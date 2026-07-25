@@ -305,6 +305,12 @@ static void adsb_task(void*) {
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
             char wantIata[4];
             if (airline_logo_pending(wantIata, sizeof(wantIata))) airline_logo_fetch(wantIata);
+            char wantReg[10];
+            if (reg_pending(wantReg, sizeof(wantReg))) {
+                char reg[12] = "", ty[24] = "";
+                reg_fetch(wantReg, reg, sizeof(reg), ty, sizeof(ty));
+                reg_store(wantReg, reg, ty);          // store even when empty: don't refetch
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -1338,6 +1344,8 @@ static void handleShot() {
 static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock)
     if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 5));
     if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
+    if (g_web.hasArg("icon")) ui_preview_weather_icon(g_web.arg("icon").toInt());
+    if (g_web.hasArg("mil")) radar::setMilitaryPreview(g_web.arg("mil").toInt() != 0);
     g_web.send(200, "text/plain", "ok");
 }
 

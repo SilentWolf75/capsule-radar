@@ -91,3 +91,38 @@ bool route_get(const char *callsign, char *from, size_t fn, char *to, size_t tn)
     }
     return false;
 }
+
+// ------------------------------------------------------------ registration
+// Kept separate from the route because adsbdb serves aircraft details from a different
+// endpoint and keys them by ICAO hex, not callsign - a registration outlives whatever
+// callsign the airframe happens to be flying under today.
+static char s_wantHex[10] = "", s_doneHex[10] = "";
+static char s_reg[12] = "", s_acType[24] = "";
+
+void reg_request(const char *hex) {
+    std::lock_guard<std::mutex> g(s_m);
+    snprintf(s_wantHex, sizeof(s_wantHex), "%s", hex ? hex : "");
+}
+
+bool reg_pending(char *o, size_t n) {
+    std::lock_guard<std::mutex> g(s_m);
+    if (s_wantHex[0] && strcmp(s_wantHex, s_doneHex) != 0) { snprintf(o, n, "%s", s_wantHex); return true; }
+    return false;
+}
+
+void reg_store(const char *hex, const char *reg, const char *type) {
+    std::lock_guard<std::mutex> g(s_m);
+    snprintf(s_doneHex, sizeof(s_doneHex), "%s", hex ? hex : "");
+    snprintf(s_reg,     sizeof(s_reg),     "%s", reg ? reg : "");
+    snprintf(s_acType,  sizeof(s_acType),  "%s", type ? type : "");
+}
+
+bool reg_get(const char *hex, char *reg, size_t rn, char *type, size_t tn) {
+    std::lock_guard<std::mutex> g(s_m);
+    if (hex && s_doneHex[0] && strcmp(hex, s_doneHex) == 0) {
+        if (reg)  snprintf(reg, rn, "%s", s_reg);
+        if (type) snprintf(type, tn, "%s", s_acType);
+        return true;
+    }
+    return false;
+}

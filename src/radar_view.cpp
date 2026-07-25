@@ -47,6 +47,10 @@
 // callsign (white) or as scope chrome (green/amber).
 #define AIRPORT_LABEL_COLOR lv_color_hex(0xD6E6FF)
 #define AIRPORT_LABEL_OPA   245
+// Military contacts. Violet is the only hue not already spoken for: the altitude ramp
+// owns red/amber/lime/green/cyan and the emergency halo owns red. Drawn as four corner
+// brackets rather than a ring so it can never be mistaken for the emergency circle.
+#define MIL_COLOR lv_color_hex(0xC77DFF)
 // ---- orb palette (Orb) ----
 #define ORB_BLIP   lv_color_hex(0xFFE11A)
 #define ORB_EMERG  lv_color_hex(0xFF4D2E)
@@ -100,6 +104,9 @@ static bool       s_airportsEnabled = true;
 static bool       s_firesEnabled    = true;
 static int        s_trafficMode     = radar::TRAFFIC_AIR;
 static bool       s_typeIcons       = true;   // per-type silhouettes vs the plain dart
+// Diagnostic: draw every contact as military. Military traffic is rare enough that the
+// marker would otherwise only be checked the first time one happens to fly past.
+static bool       s_milPreview      = false;
 static int        s_maxOnScreen     = 20;          // how many (nearest) aircraft to draw (web-configurable)
 static bool       s_bigText         = false;       // accessibility: bigger glyph labels (set before init)
 static int        s_trailMax        = TRAIL_MAX;   // per-aircraft trail length (0 = off)
@@ -127,6 +134,7 @@ struct AcDraw {
     float      track;
     lv_color_t color;
     bool       emergency;
+    bool       military;
     bool       inRange;
     char       hex[8];
     char       call[12];
@@ -654,6 +662,27 @@ static void ac_draw_cb(lv_event_t *e) {
                 h.color = COL_EMERG; h.width = 2; h.opa = 200;
                 lv_draw_arc(d, &h, &ac.pos, 16, 0, 360);
             }
+            if (ac.military || s_milPreview) {
+                // Targeting-style corner brackets: four short L pairs at the corners of
+                // a box around the glyph. Deliberately angular so it reads differently
+                // from the emergency circle even at a glance.
+                lv_draw_line_dsc_t m;
+                lv_draw_line_dsc_init(&m);
+                m.color = MIL_COLOR; m.width = 2; m.opa = 225;
+                const lv_coord_t R = 17, L = 6;
+                const lv_coord_t xs[2] = { (lv_coord_t)(ac.pos.x - R), (lv_coord_t)(ac.pos.x + R) };
+                const lv_coord_t ys[2] = { (lv_coord_t)(ac.pos.y - R), (lv_coord_t)(ac.pos.y + R) };
+                for (int iy = 0; iy < 2; ++iy) {
+                    for (int ix = 0; ix < 2; ++ix) {
+                        const lv_coord_t sx = ix ? -L : L, sy = iy ? -L : L;
+                        lv_point_t c = { xs[ix], ys[iy] };
+                        lv_point_t hx = { (lv_coord_t)(xs[ix] + sx), ys[iy] };
+                        lv_point_t vy = { xs[ix], (lv_coord_t)(ys[iy] + sy) };
+                        lv_draw_line(d, &m, &c, &hx);
+                        lv_draw_line(d, &m, &c, &vy);
+                    }
+                }
+            }
         }
 
         // selection ring(s)
@@ -796,6 +825,11 @@ void setTrafficMode(int mode) {
     if (s_acLayer) lv_obj_invalidate(s_acLayer);
 }
 int trafficMode() { return s_trafficMode; }
+
+void setMilitaryPreview(bool on) {
+    s_milPreview = on;
+    if (s_acLayer) lv_obj_invalidate(s_acLayer);
+}
 
 void setTypeIcons(bool on) {
     s_typeIcons = on;
@@ -1009,6 +1043,7 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         d.track = ac.track;
         d.color = alt_color(ac.altBaro, ac.onGround);
         d.emergency = acIsEmergency(ac.squawk);
+        d.military  = ac.military;
         snprintf(d.hex,  sizeof(d.hex),  "%s", ac.hex.c_str());
         snprintf(d.call, sizeof(d.call), "%s", ac.flight.c_str());
         snprintf(d.type, sizeof(d.type), "%s", ac.type.c_str());
@@ -1131,7 +1166,7 @@ static void fill_info(const AcDraw &a, AcInfo &out) {
     out.altFt = a.altFt; out.onGround = a.onGround;
     out.vsFpm = a.vsFpm; out.gsKt = a.gsKt;
     out.distKm = a.distKm; out.bearingDeg = a.bearingDeg;
-    out.squawk = a.squawk; out.emergency = a.emergency;
+    out.squawk = a.squawk; out.emergency = a.emergency; out.military = a.military;
 }
 
 void select(int idx) {
