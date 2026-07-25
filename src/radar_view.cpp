@@ -973,7 +973,10 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
     // so this is checked every poll rather than only on a geometry change.
     if (wildfire_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R) && s_gridLayer)
         lv_obj_invalidate(s_gridLayer);
-    vessel_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R);   // drawn on the aircraft layer
+    // Only project vessels when they're the picture being shown. In aircraft mode they
+    // are never drawn, so re-projecting every AIS contact each poll is pure waste.
+    if (s_trafficMode == radar::TRAFFIC_MARINE)
+        vessel_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R);
 
     std::map<std::string, lv_point_t> prevPos;        // smooth-motion: glide starts here
     for (const AcDraw &a : s_acs) prevPos[a.hex] = a.pos;

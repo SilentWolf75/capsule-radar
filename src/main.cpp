@@ -1165,6 +1165,7 @@ static void handleAis() {   // traffic mode (aircraft vs marine) + aisstream.io 
 static void handleMap() {   // map-tile background: on/off + style
     if (g_web.hasArg("v")) {
         g_mapBg = g_web.arg("v").toInt() != 0;
+        if (g_mapBg) map_bg_begin();       // allocated on first use, not at boot
         map_client_enable(g_mapBg);
         if (!g_mapBg) radar::update(g_snap, g_settings);   // hide it right away
     }
@@ -1545,7 +1546,11 @@ void setup() {
     g_adsb.begin(g_settings.homeLat, g_settings.homeLon, queryKm);
     wx_radar_begin();
     cloud_image_begin();
-    map_bg_begin();
+    // Only claim the map buffers if the basemap is actually on. They are two full-screen
+    // RGB565 images (~868 KB of PSRAM); allocating them for a feature that ships disabled
+    // reserved a tenth of the whole PSRAM for nothing. map_bg_begin() is idempotent, so
+    // handleMap() calls it again when the user switches the basemap on later.
+    if (g_mapBg) map_bg_begin();
     g_ac_mutex = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(adsb_task, "adsb", 16384, nullptr, 1, nullptr, 0);  // TLS needs a big stack
 
