@@ -124,6 +124,10 @@ int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
     setvbuf(stdout, NULL, _IOLBF, 0);  // line-buffered: logs appear even when piped to a file
+    if (getenv("BIGTEXT")) {           // BIGTEXT=1 ./program — preview the large-text mode
+        ui_set_large_text(true);
+        radar::setLargeText(true);
+    }
     const char *shotPath = (argc >= 3 && strcmp(argv[1], "--shot") == 0) ? argv[2] : NULL;
     const char *gifPath  = (argc >= 3 && strcmp(argv[1], "--gif")  == 0) ? argv[2] : NULL;
 

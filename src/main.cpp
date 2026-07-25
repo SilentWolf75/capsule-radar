@@ -62,6 +62,7 @@ static int                   g_rotation = 0;                         // clockwis
 static bool                  g_useGps = false;                       // auto-set home from the LC76G GPS (-G variant) (web/NVS)
 static int                   g_trailLen = 2;                         // aircraft trails 0=off 1=short 2=med 3=long (web/NVS)
 static int                   g_maxAc = 20;                           // max aircraft drawn on the scope (web/NVS)
+static bool                  g_bigText = false;                      // accessibility: large fonts (web/NVS, applied at boot)
 static volatile bool         g_onBattery = false;                    // discharging (set on core 1, read on core 0)
 static bool                  g_rtcSynced = false;                    // RTC written from NTP this session?
 static std::vector<Aircraft> g_snap;                                 // last snapshot (instant re-render on zoom)
@@ -259,7 +260,12 @@ static void loadSettings() {
     g_idleDimMs        = p.getUInt("idledim", IDLE_DIM_MS);
     g_units            = p.getInt("units", 0);
     g_tz               = p.getString("tz", TZ_STR);
+    g_bigText          = p.getBool("bigtext", false);
     p.end();
+    // fonts are baked into the widgets at creation time, so the large-text flag must be
+    // in place before display::begin() builds the UI (loadSettings runs first in setup)
+    ui_set_large_text(g_bigText);
+    radar::setLargeText(g_bigText);
 }
 
 // Audio alerts. g_alertMode: 0 = off, 1 = emergencies only, 2 = new aircraft + emergencies.
@@ -516,6 +522,7 @@ static void handleRoot() {
         "<label><input type=checkbox class=ck %s onchange='mo(this.checked)'>Military aircraft only</label>"
         "<label>Aircraft trails</label><select onchange='tl(this.value)'>%s</select>"
         "<label>Max aircraft on screen</label><select onchange='mx(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck %s onchange='bt(this.checked)'>Large text (restarts the device)</label>"
         "<label>Screen rotation (degrees clockwise)</label>"
         "<input type=number min=0 max=359 step=1 value='%d' onchange='ro(this.value)'>"
         "<label>Units</label><select onchange='u(this.value)'>%s</select></div>"
@@ -550,6 +557,7 @@ static void handleRoot() {
         "function mo(c){fetch('/milonly?v='+(c?1:0)+'&save=1')}"
         "function tl(v){fetch('/trail?v='+v+'&save=1')}"
         "function mx(v){fetch('/maxac?v='+v+'&save=1')}"
+        "function bt(c){fetch('/bigtext?v='+(c?1:0)+'&save=1')}"
         "function ro(v){fetch('/rotate?v='+v+'&save=1')}"
         "function u(v){fetch('/units?v='+v+'&save=1')}"
         "function al(v){fetch('/alerts?mode='+v+'&save=1')}"
@@ -567,7 +575,7 @@ static void handleRoot() {
         tzopts.c_str(),
         g_brightnessDay, iopts.c_str(), g_showSweep ? "checked" : "",
         g_showAirports ? "checked" : "", g_hideGround ? "checked" : "", maopts.c_str(), g_milOnly ? "checked" : "",
-        tlopts.c_str(), mxopts.c_str(), g_rotation, uopts.c_str(),
+        tlopts.c_str(), mxopts.c_str(), g_bigText ? "checked" : "", g_rotation, uopts.c_str(),
         g_volume, g_muted ? "checked" : "", aopts.c_str(), popts.c_str(),
         g_settings.homeLat, g_settings.homeLon, (g_tz == TZ_STR ? 0 : 1));
     g_web.send(200, "text/html", buf);
@@ -751,6 +759,18 @@ static void handleMilOnly() {   // military-only feed filter (applies from the n
             p.putBool("milonly", g_milOnly);
             p.end();
         }
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleBigText() {   // accessibility: large fonts. Fonts are baked at UI creation,
+    if (g_web.hasArg("v")) {    // so persist the flag and reboot cleanly to apply it.
+        g_bigText = g_web.arg("v").toInt() != 0;
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putBool("bigtext", g_bigText);
+        p.end();
+        g_rebootAtMs = millis() + 1200;   // let this response reach the browser first
     }
     g_web.send(200, "text/plain", "ok");
 }
@@ -991,6 +1011,7 @@ void setup() {
     g_web.on("/milonly", handleMilOnly);
     g_web.on("/trail", handleTrail);
     g_web.on("/maxac", handleMaxAc);
+    g_web.on("/bigtext", handleBigText);
     g_web.on("/rotate", handleRotate);
     g_web.on("/gps", handleGps);
     g_web.on("/units", handleUnits);
