@@ -1346,6 +1346,12 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
     if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
     if (g_web.hasArg("icon")) ui_preview_weather_icon(g_web.arg("icon").toInt());
     if (g_web.hasArg("mil")) radar::setMilitaryPreview(g_web.arg("mil").toInt() != 0);
+    // Select the Nth nearest contact (-1 clears), so the detail card can be captured
+    // without someone standing at the device tapping the screen.
+    if (g_web.hasArg("sel")) {
+        radar::select(g_web.arg("sel").toInt());
+        ui_on_data_updated();
+    }
     g_web.send(200, "text/plain", "ok");
 }
 

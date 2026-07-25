@@ -29,6 +29,10 @@ VIEWS = [
     (5, None, "clock",    "Clock"),
 ]
 
+# The detail card needs a contact selected and then a pause: tapping one kicks off four
+# lookups (route, photo, airline logo, registration) that land over several seconds.
+DETAIL_SETTLE_S = 11
+
 
 def get(url, timeout=60):
     with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -106,8 +110,21 @@ def main():
         except Exception as exc:
             print(f"  {name}: capture failed ({exc})")
 
+    # Detail card: select the nearest contact and wait for its lookups to arrive.
     try:
-        get(f"http://{host}/view?i=0", timeout=15)   # leave it on the radar
+        get(f"http://{host}/view?i=0&sel=0", timeout=15)
+        print(f"  {'Detail card':22} (waiting {DETAIL_SETTLE_S}s for lookups)")
+        time.sleep(DETAIL_SETTLE_S)
+        bmp = get(f"http://{host}/shot.bmp")
+        w, h, rows = read_bmp(bmp)
+        path = os.path.join(outdir, "detail.png")
+        n = write_png(path, w, h, rows)
+        print(f"  {'Detail card':22} -> {path}  ({w}x{h}, {n/1024:.0f} KB)")
+    except Exception as exc:
+        print(f"  detail: capture failed ({exc})")
+
+    try:
+        get(f"http://{host}/view?i=0&sel=-1", timeout=15)   # clear selection, back to radar
     except Exception:
         pass
 
