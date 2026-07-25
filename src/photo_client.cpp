@@ -101,13 +101,13 @@ struct PsramAlloc : ArduinoJson::Allocator {
 static PsramAlloc s_jsonPsram;
 
 bool photo_fetch(const char *hex) {
-    if (!hex || !hex[0] || WiFi.status() != WL_CONNECTED) { photo_commit(0, 0, hex, ""); return false; }
+    if (!hex || !hex[0] || WiFi.status() != WL_CONNECTED) { photo_fail(hex, true); return false; }
 
     // Memory guard: a photo fetch needs a TLS handshake + JPEG decode. If the largest
     // contiguous internal block is tight, skip it (degrade gracefully, never crash).
     if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 28000) {
         Serial.println("[photo] low memory, skipping");
-        photo_commit(0, 0, hex, "");
+        photo_fail(hex, true);
         return false;
     }
 
@@ -115,7 +115,7 @@ bool photo_fetch(const char *hex) {
     char url[128];
     snprintf(url, sizeof(url), "https://api.planespotters.net/pub/photos/hex/%s", hex);
     uint8_t *jbuf = nullptr; size_t jlen = 0;
-    if (!http_get(url, &jbuf, &jlen, 8192)) { Serial.printf("[photo] %s: planespotters request failed\n", hex); photo_commit(0, 0, hex, ""); return false; }
+    if (!http_get(url, &jbuf, &jlen, 8192)) { Serial.printf("[photo] %s: planespotters request failed\n", hex); photo_fail(hex, true); return false; }
 
     JsonDocument filter(&s_jsonPsram);
     filter["photos"][0]["thumbnail_large"]["src"] = true;
@@ -123,12 +123,14 @@ bool photo_fetch(const char *hex) {
     JsonDocument doc(&s_jsonPsram);
     const DeserializationError err = deserializeJson(doc, jbuf, jlen, DeserializationOption::Filter(filter));
     heap_caps_free(jbuf);
-    if (err) { Serial.printf("[photo] %s: json err %s\n", hex, err.c_str()); photo_commit(0, 0, hex, ""); return false; }
+    if (err) { Serial.printf("[photo] %s: json err %s\n", hex, err.c_str()); photo_fail(hex, true); return false; }
 
     const char *imgUrl = doc["photos"][0]["thumbnail_large"]["src"] | "";
     char credit[40];
     snprintf(credit, sizeof(credit), "%s", (const char *)(doc["photos"][0]["photographer"] | ""));
-    if (!imgUrl[0]) { Serial.printf("[photo] %s: no photo available\n", hex); photo_commit(0, 0, hex, ""); return false; }
+    // The only definitive answer: planespotters replied and has nothing for this
+    // airframe. Cache it so we stop asking; every other failure above is transient.
+    if (!imgUrl[0]) { Serial.printf("[photo] %s: no photo available\n", hex); photo_fail(hex, false); return false; }
 
     // 2) download the JPEG thumbnail.
     // planespotters serves *progressive* JPEGs, which TJpgDec cannot decode. Route the
@@ -144,7 +146,7 @@ bool photo_fetch(const char *hex) {
              "https://images.weserv.nl/?url=%s&w=%d&h=%d&fit=inside&output=jpg", bare, canvasW, canvasH);
 
     uint8_t *img = nullptr; size_t ilen = 0;
-    if (!http_get(proxUrl, &img, &ilen, 65536)) { Serial.printf("[photo] %s: image download failed\n", hex); photo_commit(0, 0, hex, ""); return false; }
+    if (!http_get(proxUrl, &img, &ilen, 65536)) { Serial.printf("[photo] %s: image download failed\n", hex); photo_fail(hex, true); return false; }
 
     // 3) decode into the shared PSRAM buffer, scaled to fit
     int maxW = 0, maxH = 0;
@@ -152,7 +154,7 @@ bool photo_fetch(const char *hex) {
     uint16_t jw = 0, jh = 0;
     if (TJpgDec.getJpgSize(&jw, &jh, img, ilen) != JDR_OK || jw == 0 || jh == 0) {
         Serial.printf("[photo] %s: getJpgSize failed\n", hex);
-        heap_caps_free(img); photo_commit(0, 0, hex, ""); return false;
+        heap_caps_free(img); photo_fail(hex, true); return false;
     }
     uint8_t scale = 1;
     while ((jw / scale) > (uint16_t)maxW || (jh / scale) > (uint16_t)maxH) { scale <<= 1; if (scale >= 8) break; }
@@ -167,7 +169,7 @@ bool photo_fetch(const char *hex) {
     const JRESULT jr = TJpgDec.drawJpg(0, 0, img, ilen);
     heap_caps_free(img);
 
-    if (jr != JDR_OK) { photo_commit(0, 0, hex, ""); return false; }
+    if (jr != JDR_OK) { photo_fail(hex, true); return false; }
     photo_commit(s_dstW, s_dstH, hex, credit);
     Serial.printf("[photo] %s: %dx%d (scale 1/%d) by %s\n", hex, s_dstW, s_dstH, scale, credit);
     return true;

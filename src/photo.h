@@ -9,5 +9,10 @@ void photo_request(const char *hex);                 // UI: I want this hex's ph
 bool photo_pending(char *hexOut, size_t n);          // network task: hex to fetch (deduped)
 lv_color_t *photo_buffer(int *maxW, int *maxH);      // PSRAM RGB565 buffer to decode into
 void photo_commit(int w, int h, const char *hex, const char *credit);  // ready (w=0 => none)
+// Report a failed fetch. `transient` (a dropped connection, a decode error) leaves the
+// request open so the next poll retries; a definitive "this airframe has no photo" is
+// cached like a success so it is not asked for again. Without the distinction one
+// flaky download made an aircraft permanently photo-less for the session.
+void photo_fail(const char *hex, bool transient);
 bool photo_get(const char *hex, int *w, int *h, char *credit, size_t cn);  // ready & matches?
 bool photo_done(const char *hex);                    // fetch finished for this hex (with or without a photo)

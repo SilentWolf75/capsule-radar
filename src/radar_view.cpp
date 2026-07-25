@@ -1169,6 +1169,20 @@ static void fill_info(const AcDraw &a, AcInfo &out) {
     out.squawk = a.squawk; out.emergency = a.emergency; out.military = a.military;
 }
 
+// Select by ICAO hex. The index-based form is unstable for anything scripted: the list
+// re-sorts by distance every poll, so index N is a different aircraft seconds later.
+bool selectByHex(const char *hex) {
+    if (!hex || !hex[0]) return false;
+    for (const AcDraw &a : s_acs) {
+        if (strcasecmp(a.hex, hex) == 0) {
+            s_selHex = a.hex;
+            if (s_acLayer) lv_obj_invalidate(s_acLayer);
+            return true;
+        }
+    }
+    return false;
+}
+
 void select(int idx) {
     if (idx < 0 || idx >= (int)s_acs.size()) s_selHex.clear();
     else s_selHex = s_acs[idx].hex;

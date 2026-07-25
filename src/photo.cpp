@@ -45,6 +45,22 @@ lv_color_t *photo_buffer(int *mw, int *mh) {
     return ensure_buf();
 }
 
+#define PHOTO_MAX_TRIES 3      // bound the retries: a permanently broken image must settle
+
+void photo_fail(const char *hex, bool transient) {
+    std::lock_guard<std::mutex> g(s_m);
+    static char lastHex[10] = "";
+    static int  tries = 0;
+    if (!hex) hex = "";
+    if (strcmp(hex, lastHex) != 0) { snprintf(lastHex, sizeof(lastHex), "%s", hex); tries = 0; }
+    ++tries;
+    if (transient && tries < PHOTO_MAX_TRIES) return;   // leave pending -> retried next poll
+    snprintf(s_doneHex, sizeof(s_doneHex), "%s", hex);
+    s_credit[0] = 0;
+    s_w = s_h = 0;
+    s_ready = false;
+}
+
 void photo_commit(int w, int h, const char *hex, const char *credit) {
     std::lock_guard<std::mutex> g(s_m);
     snprintf(s_doneHex, sizeof(s_doneHex), "%s", hex ? hex : "");

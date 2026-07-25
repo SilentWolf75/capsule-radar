@@ -78,6 +78,7 @@ bool firesEnabled();
 enum TrafficMode { TRAFFIC_AIR = 0, TRAFFIC_MARINE = 1 };
 void setTrafficMode(int mode);
 int  trafficMode();
+bool selectByHex(const char *hex);               // stable selection (index re-sorts each poll)
 void setMilitaryPreview(bool on);                // diagnostic: mark every contact military
 void setTypeIcons(bool on);                      // per-type silhouettes vs one generic glyph
 bool typeIcons();

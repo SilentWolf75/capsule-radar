@@ -13,7 +13,6 @@
 #include "photo.h"
 #include "photo_client.h"
 #include "airline.h"
-#include "airline_client.h"
 #include "wildfire.h"
 #include "wildfire_client.h"
 #include "map_bg.h"
@@ -303,8 +302,6 @@ static void adsb_task(void*) {
             }
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
-            char wantIata[4];
-            if (airline_logo_pending(wantIata, sizeof(wantIata))) airline_logo_fetch(wantIata);
             char wantReg[10];
             if (reg_pending(wantReg, sizeof(wantReg))) {
                 char reg[12] = "", ty[24] = "";
@@ -1351,6 +1348,12 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
     if (g_web.hasArg("sel")) {
         radar::select(g_web.arg("sel").toInt());
         ui_on_data_updated();
+    }
+    if (g_web.hasArg("selhex")) {          // stable across polls, unlike the index
+        const bool hit = radar::selectByHex(g_web.arg("selhex").c_str());
+        ui_on_data_updated();
+        g_web.send(200, "text/plain", hit ? "ok" : "not in range");
+        return;
     }
     g_web.send(200, "text/plain", "ok");
 }

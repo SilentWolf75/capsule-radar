@@ -54,7 +54,7 @@ static void set_wx_icon(lv_obj_t *o, int code, bool night) {
 }
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
-static lv_obj_t *s_cardLogo = nullptr, *s_cardAirline = nullptr;
+static lv_obj_t *s_cardAirline = nullptr;
 static lv_obj_t *s_vesselCard = nullptr, *s_vesselTitle = nullptr, *s_vesselBody = nullptr;
 static bool      s_vesselShown = false;
 static lv_obj_t *s_photo = nullptr, *s_photoCredit = nullptr;   // aircraft photo above the card
@@ -207,29 +207,17 @@ static void refresh_card(void) {
         return;
     }
 
-    // operator identity: offline name from the callsign prefix + an on-demand logo
+    // Operator identity, resolved offline from the callsign's ICAO prefix.
+    //
+    // This used to download the airline's logo. It no longer does: the only free,
+    // keyless source (kiwi.com) has partial coverage and quietly substitutes its OWN
+    // brand mark for airlines it lacks, so a Southwest flight displayed a Kiwi advert.
+    // airhex wants a paid key. A wrong logo is worse than no logo, and the embedded
+    // name table is instant, works offline, and saves a TLS handshake per tap.
     char alIata[4] = "", alName[32] = "";
     const bool haveAirline = airline_lookup(in.call, alIata, sizeof(alIata), alName, sizeof(alName));
-    if (haveAirline && alIata[0]) airline_logo_request(alIata);
-    int lw = 0, lh = 0;
-    const bool haveLogo = haveAirline && alIata[0] && airline_logo_get(alIata, &lw, &lh) && lw > 0 && lh > 0;
-    if (s_cardLogo) {
-        if (haveLogo) {
-            int mw, mh;
-            lv_color_t *lbuf = airline_logo_buffer(&mw, &mh);
-            lv_canvas_set_buffer(s_cardLogo, lbuf, lw, lh, LV_IMG_CF_TRUE_COLOR);
-            lv_obj_set_size(s_cardLogo, lw, lh);
-            lv_obj_align(s_cardLogo, LV_ALIGN_TOP_RIGHT, 0, -2);
-            lv_obj_clear_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_invalidate(s_cardLogo);
-        } else {
-            lv_obj_add_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
     if (s_cardAirline) {
-        // Name is the fallback when no logo loaded, and stays hidden once one does
-        // (the mark already says who it is, and the card row is tight).
-        if (haveAirline && !haveLogo) {
+        if (haveAirline && alName[0]) {
             char an[36];
             snprintf(an, sizeof(an), "%s", alName);
             fold_ascii(an);
@@ -1109,12 +1097,6 @@ static void build_card(void) {
     lv_obj_set_style_text_color(s_cardRoute, UI_GREEN, 0);
     lv_obj_align(s_cardRoute, LV_ALIGN_TOP_LEFT, 0, s_bigText ? 100 : 76);
 
-    // operator: logo when one downloads, otherwise the airline name. Same corner —
-    // they are mutually exclusive, so the title row never gets crowded.
-    s_cardLogo = lv_canvas_create(s_card);
-    lv_obj_set_style_radius(s_cardLogo, 3, 0);
-    lv_obj_set_style_clip_corner(s_cardLogo, true, 0);
-    lv_obj_add_flag(s_cardLogo, LV_OBJ_FLAG_HIDDEN);
 
     s_cardAirline = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardAirline, &lv_font_montserrat_12, 0);
