@@ -1367,7 +1367,7 @@ static void splash_dismiss_cb(lv_timer_t *t) {
     lv_anim_set_var(&a, cont);
     lv_anim_set_exec_cb(&a, splash_fade_cb);
     lv_anim_set_values(&a, 255, 0);
-    lv_anim_set_time(&a, 600);
+    lv_anim_set_time(&a, 800);
     lv_anim_set_ready_cb(&a, splash_del_cb);
     lv_anim_start(&a);
 }
@@ -1381,41 +1381,62 @@ void ui_splash_show(void) {
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
-    // concentric rings
-    const lv_coord_t dia[3] = { 210, 142, 78 };
-    const lv_opa_t   op[3]  = { 90, 120, 160 };
-    for (int i = 0; i < 3; ++i) {
+    // Tactical concentric scope rings
+    const lv_coord_t dia[4] = { 260, 200, 136, 72 };
+    const lv_opa_t   op[4]  = { 60, 100, 140, 180 };
+    for (int i = 0; i < 4; ++i) {
         lv_obj_t *r = lv_obj_create(cont);
         lv_obj_remove_style_all(r);
         lv_obj_set_size(r, dia[i], dia[i]);
-        lv_obj_align(r, LV_ALIGN_CENTER, 0, -8);
+        lv_obj_align(r, LV_ALIGN_CENTER, 0, -22);
         lv_obj_set_style_radius(r, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_border_color(r, UI_GREEN, 0);
         lv_obj_set_style_border_opa(r, op[i], 0);
         lv_obj_set_style_border_width(r, 2, 0);
         lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     }
-    // rotating sweep
-    lv_obj_t *sweep = lv_spinner_create(cont, 1400, 55);
-    lv_obj_set_size(sweep, 210, 210);
-    lv_obj_align(sweep, LV_ALIGN_CENTER, 0, -8);
+
+    // Center phosphor beacon dot
+    lv_obj_t *dot = lv_obj_create(cont);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, 8, 8);
+    lv_obj_align(dot, LV_ALIGN_CENTER, 0, -22);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(dot, UI_GREEN, 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Rotating radar sweep beam
+    lv_obj_t *sweep = lv_spinner_create(cont, 1500, 60);
+    lv_obj_set_size(sweep, 260, 260);
+    lv_obj_align(sweep, LV_ALIGN_CENTER, 0, -22);
     lv_obj_set_style_arc_opa(sweep, 0, LV_PART_MAIN);
     lv_obj_set_style_arc_color(sweep, UI_GREEN, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(sweep, 4, LV_PART_INDICATOR);
 
+    // Branded Title
     lv_obj_t *title = lv_label_create(cont);
     lv_label_set_text(title, "CAPSULE RADAR");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(title, UI_GREEN, 0);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 118);
 
+    // Subtitle
     lv_obj_t *sub = lv_label_create(cont);
-    lv_label_set_text(sub, "Live ADS-B radar");
+    lv_label_set_text(sub, "AIR TRAFFIC MONITORING");
     lv_obj_set_style_text_font(sub, F14(), 0);
     lv_obj_set_style_text_color(sub, UI_SOFT, 0);
     lv_obj_align(sub, LV_ALIGN_CENTER, 0, 150);
 
-    lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 2200, cont);   // hold, then fade out
+    // Version Badge at bottom
+    lv_obj_t *ver = lv_label_create(cont);
+    lv_label_set_text(ver, "v" FW_VERSION);
+    lv_obj_set_style_text_font(ver, F12(), 0);
+    lv_obj_set_style_text_color(ver, UI_DIM, 0);
+    lv_obj_align(ver, LV_ALIGN_BOTTOM_MID, 0, -22);
+
+    // Hold splash screen visible for 3.2 seconds minimum before fading
+    lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 3200, cont);
     lv_timer_set_repeat_count(t, 1);
 }
 
