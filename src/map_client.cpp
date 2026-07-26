@@ -265,10 +265,10 @@ static void compose_band(int y0, int rows) {
             int my = (int)(wy - originY);
             if (mx < 0 || mx >= s_mosaicW || my < 0 || my >= s_mosaicH) { row[px] = 0; continue; }
 
-            // Dim the basemap so the phosphor chrome and traffic stay dominant.
+            // Scale the basemap brightness (87.5%) so roads and terrain read crisply on the AMOLED screen.
             const uint16_t c = s_mosaic[(size_t)my * s_mosaicW + mx];
             const uint16_t r5 = (c >> 11) & 0x1F, g6 = (c >> 5) & 0x3F, b5 = c & 0x1F;
-            row[px] = (uint16_t)((((r5 * 5) >> 3) << 11) | (((g6 * 5) >> 3) << 5) | ((b5 * 5) >> 3));
+            row[px] = (uint16_t)((((r5 * 7) >> 3) << 11) | (((g6 * 7) >> 3) << 5) | ((b5 * 7) >> 3));
         }
     }
 }
