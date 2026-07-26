@@ -968,10 +968,52 @@ static void fire_draw_cb(lv_event_t *e) {
     lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
     const lv_coord_t cx = SCREEN_CX, cy = SCREEN_CY + 8;
 
+    // Get current view bounds to draw dynamic lat/lon grid lines
+    FireView v;
+    firemap_get_view(&v);
+
+    if (v.east > v.west && v.north > v.south) {
+        // 1. Draw a high-tech lat/lon coordinate grid
+        lv_draw_line_dsc_t grid;
+        lv_draw_line_dsc_init(&grid);
+        grid.color = lv_color_hex(0x1B2C3A);   // dark slate-blue
+        grid.width = 1;
+        grid.opa = 65;
+
+        // Draw longitude lines every 10 degrees
+        for (double lon = ceil(v.west / 10.0) * 10.0; lon <= floor(v.east / 10.0) * 10.0; lon += 10.0) {
+            lv_point_t p1, p2;
+            firemap_project(v.south, lon, cx, cy, FIREMAP_HALF_W, FIREMAP_HALF_H, &p1);
+            firemap_project(v.north, lon, cx, cy, FIREMAP_HALF_W, FIREMAP_HALF_H, &p2);
+            lv_draw_line(d, &grid, &p1, &p2);
+        }
+        // Draw latitude lines every 10 degrees
+        for (double lat = ceil(v.south / 10.0) * 10.0; lat <= floor(v.north / 10.0) * 10.0; lat += 10.0) {
+            lv_point_t p1, p2;
+            firemap_project(lat, v.west, cx, cy, FIREMAP_HALF_W, FIREMAP_HALF_H, &p1);
+            firemap_project(lat, v.east, cx, cy, FIREMAP_HALF_W, FIREMAP_HALF_H, &p2);
+            lv_draw_line(d, &grid, &p1, &p2);
+        }
+    }
+
+    // 2. Draw a subtle telemetry crosshair in the center
+    lv_draw_line_dsc_t ch;
+    lv_draw_line_dsc_init(&ch);
+    ch.color = lv_color_hex(0x2E5C86);
+    ch.width = 1;
+    ch.opa = 80;
+    lv_point_t h1 = { (lv_coord_t)(cx - 10), cy }, h2 = { (lv_coord_t)(cx + 10), cy };
+    lv_point_t v1 = { cx, (lv_coord_t)(cy - 10) }, v2 = { cx, (lv_coord_t)(cy + 10) };
+    lv_draw_line(d, &ch, &h1, &h2);
+    lv_draw_line(d, &ch, &v1, &v2);
+
+    // 3. Draw the coastline
     coastline_draw_rect(d, lv_color_hex(0x2E5C86), 150, 1);
 
-    // Cells are drawn largest-first so a big hotspot never hides under a small one.
+    // 4. Draw active hot spots with pulsing radial heat glows
     const int n = firemap_cell_count();
+    const float pulse = 0.8f + 0.2f * sinf((float)lv_tick_get() * 0.003f); // soft breathing pulse
+
     for (int pass = 1; pass >= 0; --pass) {
         for (int i = 0; i < n; ++i) {
             FireCell c;
@@ -984,21 +1026,31 @@ static void fire_draw_cb(lv_event_t *e) {
 
             const bool mid = (c.frp >= 50.0f || c.count >= 4);
             const lv_coord_t r = big ? 6 : (mid ? 4 : 2);
+            
+            // Draw a soft heat glow under the core dot
+            lv_draw_arc_dsc_t glow;
+            lv_draw_arc_dsc_init(&glow);
+            glow.color = big ? lv_color_hex(0xFF3B1F)
+                             : (mid ? lv_color_hex(0xFF7A18) : lv_color_hex(0xFFC24D));
+            glow.width = 2;
+            glow.opa = (lv_opa_t)(40.0f * pulse);
+            lv_draw_arc(d, &glow, &p, (uint16_t)(r + 3), 0, 360);
+
+            // Major hotspots have a wider secondary pulsing ring
+            if (big) {
+                glow.opa = (lv_opa_t)(20.0f * pulse);
+                lv_draw_arc(d, &glow, &p, (uint16_t)(r + 7), 0, 360);
+            }
+
+            // Core dot
             lv_draw_rect_dsc_t dot;
             lv_draw_rect_dsc_init(&dot);
             dot.radius = LV_RADIUS_CIRCLE;
             dot.bg_opa = LV_OPA_COVER;
-            dot.bg_color = big ? lv_color_hex(0xFF3B1F)
-                               : (mid ? lv_color_hex(0xFF7A18) : lv_color_hex(0xFFC24D));
+            dot.bg_color = glow.color;
             lv_area_t a = { (lv_coord_t)(p.x - r), (lv_coord_t)(p.y - r),
                             (lv_coord_t)(p.x + r), (lv_coord_t)(p.y + r) };
             lv_draw_rect(d, &dot, &a);
-            if (big) {
-                lv_draw_arc_dsc_t halo;
-                lv_draw_arc_dsc_init(&halo);
-                halo.color = dot.bg_color; halo.width = 2; halo.opa = 70;
-                lv_draw_arc(d, &halo, &p, (uint16_t)(r + 5), 0, 360);
-            }
         }
     }
 }

@@ -87,19 +87,19 @@ bool vessel_project(double homeLat, double homeLon, double rangeKm,
 
     s_marks.clear();
     if (rangeKm <= 0) return true;
-    for (int i = 0; i < n; ++i) {
-        const double d = geo::haversineKm(homeLat, homeLon, local[i].lat, local[i].lon);
-        if (d > rangeKm) continue;
-        const double brg = geo::bearingDeg(homeLat, homeLon, local[i].lat, local[i].lon);
-        const double rPx = (d / rangeKm) * rOuterPx;
-        const double a = brg * M_PI / 180.0;
+        for (int i = 0; i < n; ++i) {
+        const float d = geo::haversineKmf((float)homeLat, (float)homeLon, (float)local[i].lat, (float)local[i].lon);
+        if (d > (float)rangeKm) continue;
+        const float brg = geo::bearingDegf((float)homeLat, (float)homeLon, (float)local[i].lat, (float)local[i].lon);
+        const float rPx = (d / (float)rangeKm) * rOuterPx;
+        const float a = brg * (float)M_PI / 180.0f;
         VesselMark m;
-        m.pos.x = (lv_coord_t)lroundf((float)(cx + rPx * sin(a)));
-        m.pos.y = (lv_coord_t)lroundf((float)(cy - rPx * cos(a)));
+        m.pos.x = (lv_coord_t)lroundf(cx + rPx * sinf(a));
+        m.pos.y = (lv_coord_t)lroundf(cy - rPx * cosf(a));
         m.cogDeg = local[i].cogDeg;
         m.sogKt = local[i].sogKt;
-        m.distKm = (float)d;
-        m.bearingDeg = (float)brg;
+        m.distKm = d;
+        m.bearingDeg = brg;
         m.mmsi = local[i].mmsi;
         memcpy(m.name, local[i].name, sizeof(m.name));
         s_marks.push_back(m);

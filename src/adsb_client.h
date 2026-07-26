@@ -2,10 +2,13 @@
 // Fetches nearby aircraft from airplanes.live (fallback adsb.lol) and parses
 // the readsb JSON into a vector<Aircraft>. See docs/DATA_SOURCE.md.
 #include <vector>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include "aircraft.h"
 
 class AdsbClient {
 public:
+    ~AdsbClient() { _http.end(); }
     void begin(double homeLat, double homeLon, float rangeKm);
     void setHome(double lat, double lon) { _lat = lat; _lon = lon; }
     void setRange(float km) { _rangeKm = km; }
@@ -28,4 +31,8 @@ private:
     float  _minAltFt = 0.0f;
     bool   _milOnly = false;
     uint32_t _lastOkMs = 0;
+
+    WiFiClientSecure _client;
+    HTTPClient _http;
+    const char* _lastHost = nullptr;
 };

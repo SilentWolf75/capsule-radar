@@ -8,6 +8,13 @@
 #include <stdio.h>
 #include <string.h>
 
+struct PsramJsonAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t n) override { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); }
+    void  deallocate(void* p) override { heap_caps_free(p); }
+    void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
+};
+static PsramJsonAllocator s_jsonPsram;
+
 bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
@@ -21,6 +28,7 @@ bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
+    http.useHTTP10(true);                             // forces HTTP/1.0, disables chunked encoding
     http.setReuse(false);
     http.setConnectTimeout(3500);
     http.setTimeout(7000);
@@ -43,21 +51,11 @@ bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
         return false;
     }
 
-    // Open-Meteo replies with Transfer-Encoding: chunked. HTTPClient::getString()
-    // removes the chunk framing; parsing getStream() directly makes ArduinoJson
-    // see the hexadecimal chunk size first and report InvalidInput.
-    String payload = http.getString();
+    JsonDocument doc(&s_jsonPsram);
+    DeserializationError err = deserializeJson(doc, http.getStream());
     http.end();
-    if (payload.length() == 0) {
-        Serial.println("[weather] empty response body");
-        return false;
-    }
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
     if (err) {
-        Serial.printf("[weather] JSON error: %s (%u bytes, starts '%.24s')\n",
-                      err.c_str(), (unsigned)payload.length(), payload.c_str());
+        Serial.printf("[weather] JSON error: %s\n", err.c_str());
         return false;
     }
 

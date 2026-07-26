@@ -60,10 +60,18 @@ static int radar_png_line(PNGDRAW *draw) {
     return 1;
 }
 
-static bool https_get_string(const char *url, String &body, int timeoutMs) {
+struct PsramJsonAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t n) override { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); }
+    void  deallocate(void* p) override { heap_caps_free(p); }
+    void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
+};
+static PsramJsonAllocator s_jsonPsram;
+
+static bool https_get_json(const char *url, JsonDocument &doc, int timeoutMs) {
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
+    http.useHTTP10(true);
     http.setReuse(false);
     http.setConnectTimeout(3500);
     http.setTimeout(timeoutMs);
@@ -79,20 +87,18 @@ static bool https_get_string(const char *url, String &body, int timeoutMs) {
                       (unsigned)ESP.getFreePsram());
         http.end(); return false;
     }
-    body = http.getString();
+    DeserializationError err = deserializeJson(doc, http.getStream());
     http.end();
-    return body.length() > 0;
+    return !err;
 }
 
 bool wx_radar_fetch(double lat, double lon) {
     if (WiFi.status() != WL_CONNECTED || !wx_radar_back_buffer() || !ensure_decoder()) return false;
 
-    String meta;
-    if (!https_get_string("https://api.rainviewer.com/public/weather-maps.json", meta, 6500)) {
+    JsonDocument doc(&s_jsonPsram);
+    if (!https_get_json("https://api.rainviewer.com/public/weather-maps.json", doc, 6500)) {
         Serial.println("[wxradar] metadata fetch failed"); return false;
     }
-    JsonDocument doc;
-    if (deserializeJson(doc, meta)) { Serial.println("[wxradar] metadata JSON failed"); return false; }
     const char *host = doc["host"] | "";
     JsonArrayConst past = doc["radar"]["past"].as<JsonArrayConst>();
     if (!host[0] || past.size() == 0) { Serial.println("[wxradar] no radar frames"); return false; }

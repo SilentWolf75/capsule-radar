@@ -228,38 +228,38 @@ static void compose_band(int y0, int rows) {
     uint16_t *dst = map_bg_back_buffer();
     if (!dst || !s_mosaic) return;
 
-    const double R = 6371.0088;
-    const double lat1 = s_lat * M_PI / 180.0;
-    const double lon1 = s_lon * M_PI / 180.0;
-    const double sinLat1 = sin(lat1), cosLat1 = cos(lat1);
-    const double ws = world_size(s_zoom);
-    const double originX = (double)s_tx0 * MAP_TILE_PX;
-    const double originY = (double)s_ty0 * MAP_TILE_PX;
-    const double kmPerPx = (double)s_rangeKm / (double)RADAR_R_OUTER_PX;
+    const float R = 6371.0088f;
+    const float lat1 = (float)(s_lat * M_PI / 180.0);
+    const float lon1 = (float)(s_lon * M_PI / 180.0);
+    const float sinLat1 = sinf(lat1), cosLat1 = cosf(lat1);
+    const float ws = (float)world_size(s_zoom);
+    const float originX = (float)s_tx0 * MAP_TILE_PX;
+    const float originY = (float)s_ty0 * MAP_TILE_PX;
+    const float kmPerPx = s_rangeKm / RADAR_R_OUTER_PX;
     const int cx = SCREEN_CX, cy = SCREEN_CY;
     const long rMax = (long)RADAR_R_OUTER_PX * RADAR_R_OUTER_PX;
 
     const int yEnd = (y0 + rows > MAP_BG_SIZE) ? MAP_BG_SIZE : (y0 + rows);
     for (int py = y0; py < yEnd; ++py) {
-        const long dy = py - cy;
+        const float dy = (float)(py - cy);
         uint16_t *row = dst + (size_t)py * MAP_BG_SIZE;
         for (int px = 0; px < MAP_BG_SIZE; ++px) {
-            const long dx = px - cx;
-            const long rr = dx * dx + dy * dy;
-            if (rr > rMax) { row[px] = 0; continue; }      // outside the scope circle
+            const float dx = (float)(px - cx);
+            const float rr = dx * dx + dy * dy;
+            if (rr > (float)rMax) { row[px] = 0; continue; }      // outside the scope circle
 
-            const double rPx = sqrt((double)rr);
-            const double d = (rPx * kmPerPx) / R;          // angular distance
-            const double brg = atan2((double)dx, -(double)dy);   // screen up = north
+            const float rPx = sqrtf(rr);
+            const float d = (rPx * kmPerPx) / R;          // angular distance
+            const float brg = atan2f(dx, -dy);   // screen up = north
 
-            const double sinD = sin(d), cosD = cos(d);
-            const double lat2 = asin(sinLat1 * cosD + cosLat1 * sinD * cos(brg));
-            const double lon2 = lon1 + atan2(sin(brg) * sinD * cosLat1,
-                                             cosD - sinLat1 * sin(lat2));
+            const float sinD = sinf(d), cosD = cosf(d);
+            const float lat2 = asinf(sinLat1 * cosD + cosLat1 * sinD * cosf(brg));
+            const float lon2 = lon1 + atan2f(sinf(brg) * sinD * cosLat1,
+                                             cosD - sinLat1 * sinf(lat2));
 
-            double wx = (lon2 * 180.0 / M_PI + 180.0) / 360.0 * ws;
-            const double sl = sin(lat2);
-            double wy = (0.5 - log((1.0 + sl) / (1.0 - sl)) / (4.0 * M_PI)) * ws;
+            float wx = (lon2 * 180.0f / (float)M_PI + 180.0f) / 360.0f * ws;
+            const float sl = sinf(lat2);
+            float wy = (0.5f - logf((1.0f + sl) / (1.0f - sl)) / (4.0f * (float)M_PI)) * ws;
 
             int mx = (int)(wx - originX);
             int my = (int)(wy - originY);

@@ -14,33 +14,33 @@ void coastline_project(double homeLat, double homeLon, double rangeKm,
     s_lines.clear();
     if (rangeKm <= 0) return;
 
-    const double EDGE = 1.08;                       // include a touch past the rim, then clip
-    const double rangeDeg  = rangeKm / 111.0;
-    const double latMargin = rangeDeg * 1.20;
-    const double cosLat    = cos(homeLat * M_PI / 180.0);
-    const double lonMargin = latMargin / (cosLat < 0.15 ? 0.15 : cosLat);
+    const float EDGE = 1.08f;                       // include a touch past the rim, then clip
+    const float rangeDeg  = (float)rangeKm / 111.0f;
+    const float latMargin = rangeDeg * 1.20f;
+    const float cosLat    = cosf((float)(homeLat * M_PI / 180.0));
+    const float lonMargin = latMargin / (cosLat < 0.15f ? 0.15f : cosLat);
 
     const int16_t *p = COAST_PTS;
     for (int poly = 0; poly < COAST_NUM_POLYS; ++poly) {
         const int n = COAST_POLY_LEN[poly];
         std::vector<lv_point_t> run;
         for (int i = 0; i < n; ++i) {
-            const double lat = p[i * 2]     / (double)COAST_SCALE;
-            const double lon = p[i * 2 + 1] / (double)COAST_SCALE;
-            const double dlon = lon - homeLon;
+            const float lat = (float)p[i * 2]     / (float)COAST_SCALE;
+            const float lon = (float)p[i * 2 + 1] / (float)COAST_SCALE;
+            const float dlon = lon - (float)homeLon;
             // cheap bounding-box reject (no trig) discards ~99% of the planet instantly;
             // the second dlon test wraps the antimeridian so e.g. home near 179E still works.
-            const bool out = (fabs(lat - homeLat) > latMargin) ||
-                             (fabs(dlon) > lonMargin && fabs(fabs(dlon) - 360.0) > lonMargin);
+            const bool out = (fabsf(lat - (float)homeLat) > latMargin) ||
+                             (fabsf(dlon) > lonMargin && fabsf(fabsf(dlon) - 360.0f) > lonMargin);
             if (!out) {
-                const double dist = geo::haversineKm(homeLat, homeLon, lat, lon);
-                if (dist <= rangeKm * EDGE) {
-                    const double brg = geo::bearingDeg(homeLat, homeLon, lat, lon);
-                    const double rPx = (dist / rangeKm) * rOuterPx;
-                    const double a   = brg * M_PI / 180.0;
+                const float dist = geo::haversineKmf((float)homeLat, (float)homeLon, lat, lon);
+                if (dist <= (float)rangeKm * EDGE) {
+                    const float brg = geo::bearingDegf((float)homeLat, (float)homeLon, lat, lon);
+                    const float rPx = (dist / (float)rangeKm) * rOuterPx;
+                    const float a   = brg * (float)M_PI / 180.0f;
                     lv_point_t sp;
-                    sp.x = (lv_coord_t)lroundf((float)(cx + rPx * sin(a)));
-                    sp.y = (lv_coord_t)lroundf((float)(cy - rPx * cos(a)));
+                    sp.x = (lv_coord_t)lroundf(cx + rPx * sinf(a));
+                    sp.y = (lv_coord_t)lroundf(cy - rPx * cosf(a));
                     run.push_back(sp);
                     continue;
                 }
@@ -83,29 +83,29 @@ void coastline_project_rect(double west, double south, double east, double north
 
     // Longitude compressed by cos(mid-latitude), and the whole box fitted inside the
     // draw area preserving aspect - otherwise the continent renders as a wide smear.
-    const double midLat = (south + north) * 0.5, midLon = (west + east) * 0.5;
-    double k = cos(midLat * M_PI / 180.0);
-    if (k < 0.2) k = 0.2;
-    const double wDeg = (east - west) * k, hDeg = north - south;
-    const double sx = 2.0 * halfW / wDeg, sy = 2.0 * halfH / hDeg;
-    const double s = (sx < sy) ? sx : sy;
+    const float midLat = (float)((south + north) * 0.5), midLon = (float)((west + east) * 0.5);
+    float k = cosf(midLat * (float)M_PI / 180.0f);
+    if (k < 0.2f) k = 0.2f;
+    const float wDeg = (float)(east - west) * k, hDeg = (float)(north - south);
+    const float sx = 2.0f * halfW / wDeg, sy = 2.0f * halfH / hDeg;
+    const float s = (sx < sy) ? sx : sy;
 
     const int16_t *p = COAST_PTS;
     for (int poly = 0; poly < COAST_NUM_POLYS; ++poly) {
         const int n = COAST_POLY_LEN[poly];
         std::vector<lv_point_t> run;
         for (int i = 0; i < n; ++i) {
-            const double lat = p[i * 2]     / (double)COAST_SCALE;
-            const double lon = p[i * 2 + 1] / (double)COAST_SCALE;
+            const float lat = (float)p[i * 2]     / (float)COAST_SCALE;
+            const float lon = (float)p[i * 2 + 1] / (float)COAST_SCALE;
             // Margin so coastlines entering the view are not clipped mid-stroke.
-            if (lat < south - 4 || lat > north + 4 || lon < west - 6 || lon > east + 6) {
+            if (lat < (float)south - 4.0f || lat > (float)north + 4.0f || lon < (float)west - 6.0f || lon > (float)east + 6.0f) {
                 if (run.size() > 1) s_rectLines.push_back(run);
                 run.clear();
                 continue;
             }
             lv_point_t sp;
-            sp.x = (lv_coord_t)lround(cx + (lon - midLon) * k * s);
-            sp.y = (lv_coord_t)lround(cy - (lat - midLat) * s);
+            sp.x = (lv_coord_t)lroundf(cx + (lon - midLon) * k * s);
+            sp.y = (lv_coord_t)lroundf(cy - (lat - midLat) * s);
             // Decimate. At continental scale one pixel spans a third of a degree, so
             // consecutive source points land on top of each other: keeping them all
             // produced ~100k segments per frame, which stalled the render entirely.

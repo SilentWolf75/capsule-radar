@@ -64,31 +64,30 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
     char url[160];
     snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, _lat, _lon, nm);
 
-    WiFiClientSecure client;
-#if ADSB_HTTPS_INSECURE
-    client.setInsecure();                              // hobby: skip cert validation
-#else
-    // client.setCACert(ROOT_CA_PEM);                  // production: pin the root CA
-#endif
+    bool hostChanged = (_lastHost == nullptr || strcmp(_lastHost, host) != 0);
+    if (hostChanged) {
+        _http.end();
+        _client.setInsecure();
+        _http.setReuse(true);
+        _http.setConnectTimeout(6000);
+        _http.setTimeout(8000);
+        _lastHost = host;
+    }
 
-    HTTPClient http;
-    http.setReuse(false);
-    http.setConnectTimeout(6000);    // fail reasonably fast: a slow host must not block the
-    http.setTimeout(8000);           // task (and the user's route/photo lookups) for too long
-    if (!http.begin(client, url)) { Serial.printf("[adsb] begin failed (%s)\n", host); return false; }
-    http.addHeader("User-Agent", ADSB_USER_AGENT);
-    http.addHeader("Accept", "application/json");
+    if (!_http.begin(_client, url)) { Serial.printf("[adsb] begin failed (%s)\n", host); return false; }
+    _http.addHeader("User-Agent", ADSB_USER_AGENT);
+    _http.addHeader("Accept", "application/json");
 
-    const int code = http.GET();
+    const int code = _http.GET();
     if (code != 200) {
         char tls[128] = "";
-        const int tlsCode = client.lastError(tls, sizeof(tls));
+        const int tlsCode = _client.lastError(tls, sizeof(tls));
         Serial.printf("[adsb] HTTP %d (%s) tls=%d '%s' heap=%u largest=%u psram=%u\n",
                       code, host, tlsCode, tls,
                       (unsigned)ESP.getFreeHeap(),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned)ESP.getFreePsram());
-        http.end(); return false;
+        _http.end(); return false;
     }
 
     // Only keep the fields we use -> much smaller parsed document.
@@ -102,8 +101,8 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
             filter[k][0][f] = true;
 
     JsonDocument doc(&s_jsonPsram);
-    const int expectedBytes = http.getSize();
-    NetworkClient& responseStream = http.getStream();
+    const int expectedBytes = _http.getSize();
+    NetworkClient& responseStream = _http.getStream();
     ReliableJsonStream jsonStream(responseStream);
     DeserializationError err = deserializeJson(doc, jsonStream,
                                                DeserializationOption::Filter(filter));
@@ -111,10 +110,10 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
         Serial.printf("[adsb] JSON parse failed (%s): %s; expected=%d read=%u available=%d connected=%d\n",
                       host, err.c_str(), expectedBytes, (unsigned)jsonStream.bytesRead(),
                       responseStream.available(), responseStream.connected());
-        http.end();
+        _http.end();
         return false;
     }
-    http.end();
+    _http.end();
 
     JsonArrayConst arr = doc["ac"].as<JsonArrayConst>();
     if (arr.isNull()) arr = doc["aircraft"].as<JsonArrayConst>();

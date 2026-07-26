@@ -65,11 +65,19 @@ void updater_state(char *latest, size_t ln, char *status, size_t sn, bool *avail
     if (avail)  *avail = s_available;
 }
 
+struct PsramJsonAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t n) override { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); }
+    void  deallocate(void* p) override { heap_caps_free(p); }
+    void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
+};
+static PsramJsonAllocator s_jsonPsram;
+
 // --- check: fetch the manifest the flasher workflow publishes ---------------------
 static void do_check(void) {
     WiFiClientSecure cli;
     cli.setInsecure();
     HTTPClient http;
+    http.useHTTP10(true);
     http.setReuse(false);
     http.setConnectTimeout(4000);
     http.setTimeout(8000);
@@ -83,8 +91,8 @@ static void do_check(void) {
         set_status(m);
         return;
     }
-    JsonDocument filter; filter["version"] = true;
-    JsonDocument doc;
+    JsonDocument filter(&s_jsonPsram); filter["version"] = true;
+    JsonDocument doc(&s_jsonPsram);
     const DeserializationError err = deserializeJson(doc, http.getStream(),
                                                      DeserializationOption::Filter(filter));
     http.end();

@@ -1325,7 +1325,7 @@ static void handleQuiet() {   // quiet hours: mode + window (applies live)
     const bool quiet = quietWindowNow();
     if (quiet != g_inQuiet) {
         g_inQuiet = quiet;
-        if (g_qhMode == 3) ui_show_view(quiet ? 4 : 0);
+        if (g_qhMode == 3) ui_show_view(quiet ? 5 : 0);
     }
     applyBrightness();
     g_web.send(200, "text/plain", "ok");
@@ -1820,7 +1820,7 @@ void loop() {
         const bool quiet = quietWindowNow();
         if (quiet != g_inQuiet) {
             g_inQuiet = quiet;
-            if (g_qhMode == 3) ui_show_view(quiet ? 4 : 0);
+            if (g_qhMode == 3) ui_show_view(quiet ? 5 : 0);
             applyBrightness();
         }
         if (sleep != g_asleep || idle != g_idle) {

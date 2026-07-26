@@ -18,25 +18,25 @@ void airports_project(double homeLat, double homeLon, double rangeKm,
     s_apts.clear();
     if (rangeKm <= 0) return;
 
-    const double rangeDeg  = rangeKm / 111.0;
-    const double latMargin = rangeDeg * 1.05;
-    const double cosLat    = cos(homeLat * M_PI / 180.0);
-    const double lonMargin = latMargin / (cosLat < 0.15 ? 0.15 : cosLat);
+    const float rangeDeg  = (float)rangeKm / 111.0f;
+    const float latMargin = rangeDeg * 1.05f;
+    const float cosLat    = cosf((float)(homeLat * M_PI / 180.0));
+    const float lonMargin = latMargin / (cosLat < 0.15f ? 0.15f : cosLat);
 
     for (int i = 0; i < AIRPORT_NUM; ++i) {
-        const double lat = AIRPORT_LAT[i] / (double)AIRPORT_SCALE;
-        const double lon = AIRPORT_LON[i] / (double)AIRPORT_SCALE;
-        const double dlon = lon - homeLon;
-        if (fabs(lat - homeLat) > latMargin) continue;                      // cheap bbox reject
-        if (fabs(dlon) > lonMargin && fabs(fabs(dlon) - 360.0) > lonMargin) continue;
-        const double dist = geo::haversineKm(homeLat, homeLon, lat, lon);
-        if (dist > rangeKm) continue;                                       // only inside the scope
-        const double brg = geo::bearingDeg(homeLat, homeLon, lat, lon);
-        const double rPx = (dist / rangeKm) * rOuterPx;
-        const double a   = brg * M_PI / 180.0;
+        const float lat = (float)AIRPORT_LAT[i] / (float)AIRPORT_SCALE;
+        const float lon = (float)AIRPORT_LON[i] / (float)AIRPORT_SCALE;
+        const float dlon = lon - (float)homeLon;
+        if (fabsf(lat - (float)homeLat) > latMargin) continue;                      // cheap bbox reject
+        if (fabsf(dlon) > lonMargin && fabsf(fabsf(dlon) - 360.0f) > lonMargin) continue;
+        const float dist = geo::haversineKmf((float)homeLat, (float)homeLon, lat, lon);
+        if (dist > (float)rangeKm) continue;                                       // only inside the scope
+        const float brg = geo::bearingDegf((float)homeLat, (float)homeLon, lat, lon);
+        const float rPx = (dist / (float)rangeKm) * rOuterPx;
+        const float a   = brg * (float)M_PI / 180.0f;
         Apt ap;
-        ap.pos.x = (lv_coord_t)lroundf((float)(cx + rPx * sin(a)));
-        ap.pos.y = (lv_coord_t)lroundf((float)(cy - rPx * cos(a)));
+        ap.pos.x = (lv_coord_t)lroundf(cx + rPx * sinf(a));
+        ap.pos.y = (lv_coord_t)lroundf(cy - rPx * cosf(a));
         memcpy(ap.iata, AIRPORT_IATA[i], sizeof(ap.iata));
         ap.iata[sizeof(ap.iata) - 1] = 0;
         ap.large = AIRPORT_LARGE[i];
@@ -90,9 +90,9 @@ bool airports_nearest_iata(double lat, double lon, float maxKm,
         for (int i = 0; i < AIRPORT_NUM; ++i) {
             if (pass == 0 && !AIRPORT_LARGE[i]) continue;
             if (!AIRPORT_IATA[i][0]) continue;
-            const double alat = AIRPORT_LAT[i] / (double)AIRPORT_SCALE;
-            const double alon = AIRPORT_LON[i] / (double)AIRPORT_SCALE;
-            const double d = geo::haversineKm(lat, lon, alat, alon);
+            const float alat = (float)AIRPORT_LAT[i] / (float)AIRPORT_SCALE;
+            const float alon = (float)AIRPORT_LON[i] / (float)AIRPORT_SCALE;
+            const float d = geo::haversineKmf((float)lat, (float)lon, alat, alon);
             if (d < best) { best = d; bestIdx = i; }
         }
     }
@@ -100,9 +100,9 @@ bool airports_nearest_iata(double lat, double lon, float maxKm,
     if (iata) { memcpy(iata, AIRPORT_IATA[bestIdx], 6); iata[5] = 0; }
     if (distKm) *distKm = (float)best;
     if (bearingDeg) {
-        const double alat = AIRPORT_LAT[bestIdx] / (double)AIRPORT_SCALE;
-        const double alon = AIRPORT_LON[bestIdx] / (double)AIRPORT_SCALE;
-        *bearingDeg = (float)geo::bearingDeg(lat, lon, alat, alon);
+        const float alat = (float)AIRPORT_LAT[bestIdx] / (float)AIRPORT_SCALE;
+        const float alon = (float)AIRPORT_LON[bestIdx] / (float)AIRPORT_SCALE;
+        *bearingDeg = geo::bearingDegf((float)lat, (float)lon, alat, alon);
     }
     return true;
 }

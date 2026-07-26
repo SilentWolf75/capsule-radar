@@ -10,10 +10,24 @@
 #include <esp_heap_caps.h>
 #include <string.h>
 #include <time.h>   // route-cache TTL
+#include <map>
+#include <string>
 
 #define ROUTE_CACHE_MAX 200   // wrap the cache before it can crowd NVS
+#define ROUTE_FMT_VER 4       // Bump version to migrate old callsign-keyed NVS layout
 
-// strip spaces -> a valid NVS key (callsigns are <= 8 chars)
+struct PsramJsonAllocator : ArduinoJson::Allocator {
+    void* allocate(size_t n) override { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); }
+    void  deallocate(void* p) override { heap_caps_free(p); }
+    void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
+};
+static PsramJsonAllocator s_jsonPsram;
+
+// Circular buffer cache (in-RAM map + slot-based NVS)
+static std::map<std::string, String> s_ramCache;
+static int s_nextSlot = 0;
+
+// strip spaces -> a valid clean key (callsigns are <= 8 chars)
 static void route_key(const char *callsign, char *out, size_t on) {
     size_t j = 0;
     for (const char *p = callsign; *p && j < on - 1; ++p)
@@ -21,12 +35,31 @@ static void route_key(const char *callsign, char *out, size_t on) {
     out[j] = 0;
 }
 
-#define ROUTE_FMT_VER 3   // bump to invalidate cached routes when the stored format changes
-
 void route_cache_begin() {
     Preferences p;
     if (!p.begin("routes", false)) return;
-    if (p.getUChar("__v", 0) != ROUTE_FMT_VER) { p.clear(); p.putUChar("__v", ROUTE_FMT_VER); }
+    if (p.getUChar("__v", 0) != ROUTE_FMT_VER) {
+        p.clear();
+        p.putUChar("__v", ROUTE_FMT_VER);
+        p.putInt("__next", 0);
+    }
+    s_nextSlot = p.getInt("__next", 0);
+    if (s_nextSlot < 0 || s_nextSlot >= ROUTE_CACHE_MAX) {
+        s_nextSlot = 0;
+    }
+    // Load all slots from NVS into RAM cache
+    for (int i = 0; i < ROUTE_CACHE_MAX; ++i) {
+        char key[8];
+        snprintf(key, sizeof(key), "r%d", i);
+        String val = p.getString(key, "");
+        if (val.length() > 0) {
+            int sep = val.indexOf('|');
+            if (sep > 0) {
+                String callsign = val.substring(0, sep);
+                s_ramCache[std::string(callsign.c_str())] = val;
+            }
+        }
+    }
     p.end();
 }
 
@@ -39,23 +72,30 @@ bool route_cache_get(const char *callsign, char *from, size_t fn, char *to, size
     char key[12];
     route_key(callsign, key, sizeof(key));
     if (!key[0]) return false;
-    Preferences p;
-    if (!p.begin("routes", true)) return false;
-    // stored as "epoch|from|to" plus, when the endpoints resolved, "|flat|flon|tlat|tlon"
-    String v = p.getString(key, "");
-    p.end();
+
+    auto it = s_ramCache.find(std::string(key));
+    if (it == s_ramCache.end()) return false;
+
+    String v = it->second;
     if (v.length() == 0) return false;
-    const int b1 = v.indexOf('|');
+    
+    // Format is "callsign|epoch|from|to" (+ coords)
+    int b0 = v.indexOf('|'); // after callsign
+    if (b0 < 0) return false;
+    String rest0 = v.substring(b0 + 1);
+    
+    int b1 = rest0.indexOf('|'); // after epoch
     if (b1 < 0) return false;
-    const uint32_t ts = (uint32_t)v.substring(0, b1).toInt();
-    const String rest = v.substring(b1 + 1);
-    const int b2 = rest.indexOf('|');
+    const uint32_t ts = (uint32_t)rest0.substring(0, b1).toInt();
+    const String rest = rest0.substring(b1 + 1);
+    const int b2 = rest.indexOf('|'); // after from
     if (b2 < 0) return false;
     const uint32_t now = (uint32_t)time(nullptr);    // expire stale routes (reused callsigns)
     if (now > 1700000000UL && ts > 1700000000UL && (now - ts) > 86400UL) return false;  // 24 h TTL
+    
     snprintf(from, fn, "%s", rest.substring(0, b2).c_str());
     const String tail = rest.substring(b2 + 1);
-    const int b3 = tail.indexOf('|');
+    const int b3 = tail.indexOf('|'); // after to
     if (b3 < 0) {                       // labels only (no coordinates were resolved)
         snprintf(to, tn, "%s", tail.c_str());
         return true;
@@ -80,21 +120,46 @@ bool route_cache_get(const char *callsign, char *from, size_t fn, char *to, size
 void route_cache_put(const char *callsign, const char *from, const char *to,
                      const RouteCoords *coords) {
     if (!callsign || !callsign[0]) return;
-    char key[12];
-    route_key(callsign, key, sizeof(key));
-    if (!key[0]) return;
+    char cleanKey[12];
+    route_key(callsign, cleanKey, sizeof(cleanKey));
+    if (!cleanKey[0]) return;
+    
     Preferences p;
     if (!p.begin("routes", false)) return;
-    int n = p.getInt("__n", 0);
-    if (n >= ROUTE_CACHE_MAX) { p.clear(); n = 0; }   // wrap to bound NVS usage
-    String v = String((uint32_t)time(nullptr)) + "|" + String(from ? from : "") + "|" + String(to ? to : "");
+    
+    String v = String(cleanKey) + "|" + String((uint32_t)time(nullptr)) + "|" + String(from ? from : "") + "|" + String(to ? to : "");
     if (coords && coords->valid) {
         char c[64];
         snprintf(c, sizeof(c), "|%.4f|%.4f|%.4f|%.4f",
                  coords->fromLat, coords->fromLon, coords->toLat, coords->toLon);
         v += c;
     }
-    if (p.putString(key, v) > 0) p.putInt("__n", n + 1);
+    
+    // Find slot to overwrite
+    int targetSlot = s_nextSlot;
+    bool alreadyExists = false;
+    
+    for (int i = 0; i < ROUTE_CACHE_MAX; ++i) {
+        char k[8];
+        snprintf(k, sizeof(k), "r%d", i);
+        String val = p.getString(k, "");
+        int sep = val.indexOf('|');
+        if (sep > 0 && val.substring(0, sep) == cleanKey) {
+            targetSlot = i;
+            alreadyExists = true;
+            break;
+        }
+    }
+    
+    char key[8];
+    snprintf(key, sizeof(key), "r%d", targetSlot);
+    if (p.putString(key, v) > 0) {
+        s_ramCache[std::string(cleanKey)] = v;
+        if (!alreadyExists) {
+            s_nextSlot = (s_nextSlot + 1) % ROUTE_CACHE_MAX;
+            p.putInt("__next", s_nextSlot);
+        }
+    }
     p.end();
 }
 
@@ -146,7 +211,7 @@ bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t t
     const int code = http.GET();
     if (code != 200) { http.end(); return false; }
 
-    JsonDocument filter;
+    JsonDocument filter(&s_jsonPsram);
     filter["response"]["flightroute"]["origin"]["municipality"] = true;
     filter["response"]["flightroute"]["origin"]["iata_code"] = true;
     filter["response"]["flightroute"]["origin"]["name"] = true;
@@ -158,7 +223,7 @@ bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t t
     filter["response"]["flightroute"]["destination"]["latitude"] = true;
     filter["response"]["flightroute"]["destination"]["longitude"] = true;
 
-    JsonDocument doc;
+    JsonDocument doc(&s_jsonPsram);
     DeserializationError err = deserializeJson(doc, http.getStream(),
                                                DeserializationOption::Filter(filter));
     http.end();
@@ -210,12 +275,12 @@ bool reg_fetch(const char *hex, char *reg, size_t rn, char *type, size_t tn) {
     const int code = http.GET();
     if (code != 200) { http.end(); return false; }
 
-    JsonDocument filter;
+    JsonDocument filter(&s_jsonPsram);
     filter["response"]["aircraft"]["registration"] = true;
     filter["response"]["aircraft"]["type"] = true;
     filter["response"]["aircraft"]["icao_type"] = true;
 
-    JsonDocument doc;
+    JsonDocument doc(&s_jsonPsram);
     const DeserializationError err = deserializeJson(doc, http.getStream(),
                                                      DeserializationOption::Filter(filter));
     http.end();

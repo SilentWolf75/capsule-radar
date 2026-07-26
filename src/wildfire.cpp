@@ -49,16 +49,16 @@ bool wildfire_project(double homeLat, double homeLon, double rangeKm,
     s_marks.clear();
     if (rangeKm <= 0) return true;
     for (int i = 0; i < n; ++i) {
-        const double d = geo::haversineKm(homeLat, homeLon, local[i].lat, local[i].lon);
-        if (d > rangeKm) continue;                          // only inside the scope
-        const double brg = geo::bearingDeg(homeLat, homeLon, local[i].lat, local[i].lon);
-        const double rPx = (d / rangeKm) * rOuterPx;
-        const double a = brg * M_PI / 180.0;
+        const float d = geo::haversineKmf((float)homeLat, (float)homeLon, (float)local[i].lat, (float)local[i].lon);
+        if (d > (float)rangeKm) continue;                          // only inside the scope
+        const float brg = geo::bearingDegf((float)homeLat, (float)homeLon, (float)local[i].lat, (float)local[i].lon);
+        const float rPx = (d / (float)rangeKm) * rOuterPx;
+        const float a = brg * (float)M_PI / 180.0f;
         FireMark m;
-        m.pos.x = (lv_coord_t)lroundf((float)(cx + rPx * sin(a)));
-        m.pos.y = (lv_coord_t)lroundf((float)(cy - rPx * cos(a)));
+        m.pos.x = (lv_coord_t)lroundf(cx + rPx * sinf(a));
+        m.pos.y = (lv_coord_t)lroundf(cy - rPx * cosf(a));
         m.frp = local[i].frp;
-        m.distKm = (float)d;
+        m.distKm = d;
         m.src = i;
         s_marks.push_back(m);
     }

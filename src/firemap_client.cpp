@@ -161,8 +161,15 @@ bool firemap_client_step(void) {
 
     if (s_state == FM_PARSE) { parse_band(); return true; }
 
-    if (firemap_needs_fetch() && (int32_t)(millis() - s_nextAt) >= 0) {
+    static FireView lastView = {0, 0, 0, 0};
+    FireView v;
+    firemap_get_view(&v);
+    const bool viewChanged = (v.west != lastView.west || v.east != lastView.east ||
+                              v.south != lastView.south || v.north != lastView.north);
+
+    if (firemap_needs_fetch() && (viewChanged || (int32_t)(millis() - s_nextAt) >= 0)) {
         s_nextAt = millis() + FIREMAP_REFRESH_MS;
+        lastView = v;
         if (!start_fetch()) firemap_mark_fetched();   // don't spin on a failure
         return true;
     }
