@@ -68,9 +68,9 @@
 // Do not "optimise" these without looking at the screen.
 #define SWEEP_PERIOD_MS   2800
 #define SWEEP_FRAME_MS    25
-#define SWEEP_TRAIL_DEG   42.0f
-#define SWEEP_TRAIL_STEPS 22
-#define SWEEP_TRAIL_OPA   120
+#define SWEEP_TRAIL_DEG   55.0f
+#define SWEEP_TRAIL_STEPS 30
+#define SWEEP_TRAIL_OPA   140
 
 // ---- aircraft / flow / orb config ----
 #define TRAIL_MAX         7
@@ -379,7 +379,7 @@ static void sweep_draw_cb(lv_event_t *e) {
     const float R = (float)RADAR_R_OUTER_PX;
 
     // Draw continuous filled pie-slice triangles for a 100% smooth phosphor sector (no discrete lines)
-    const int steps = 40;
+    const int steps = 60;
     const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
     lv_draw_rect_dsc_t polyDsc;
     lv_draw_rect_dsc_init(&polyDsc);
@@ -390,7 +390,7 @@ static void sweep_draw_cb(lv_event_t *e) {
         const float a1 = s_sweepDeg - (float)i * stepDeg;
         const float a2 = s_sweepDeg - (float)(i - 1) * stepDeg;
         
-        polyDsc.bg_opa = (lv_opa_t)(frac * frac * 140.0f);
+        polyDsc.bg_opa = (lv_opa_t)(frac * frac * 165.0f);
         if (polyDsc.bg_opa < 2) continue;
 
         lv_point_t pts[3];
@@ -637,6 +637,16 @@ static void ac_draw_cb(lv_event_t *e) {
                     float glowFrac = 1.0f - (delta / 55.0f);
                     // Smooth quadratic decay from 255 (100% full bright glow) down to 100 (39% dim)
                     targetOpa = (lv_opa_t)(100.0f + 155.0f * (glowFrac * glowFrac));
+
+                    // Draw soft glowing phosphor radial halo surrounding blip (matching sample 2 & sample 3)
+                    lv_draw_arc_dsc_t haloDsc;
+                    lv_draw_arc_dsc_init(&haloDsc);
+                    haloDsc.color = ac.color;
+                    haloDsc.width = (uint16_t)(3 + (uint16_t)(glowFrac * 5.0f));
+                    haloDsc.opa = (lv_opa_t)(glowFrac * glowFrac * 210.0f);
+                    if (haloDsc.opa > 10) {
+                        lv_draw_arc(d, &haloDsc, &ac.pos, 10, 0, 360);
+                    }
                 }
             } else {
                 targetOpa = LV_OPA_COVER;
