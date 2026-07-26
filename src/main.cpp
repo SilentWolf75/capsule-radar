@@ -376,7 +376,6 @@ static void loadSettings() {
     ui_set_time_24h(g_time24);
     wildfire_set_key(g_firmsKey.c_str());
     map_client_set_style(g_mapStyle);
-    map_client_set_opacity(g_mapOpa);
     map_client_enable(g_mapBg);
     ais_set_key(g_aisKey.c_str());
     // fonts are baked into the widgets at creation time, so the large-text flag must be
@@ -1261,8 +1260,7 @@ static void handleMap() {   // map-tile background: on/off + style
 static void handleMapOpa() {
     if (g_web.hasArg("v")) {
         g_mapOpa = constrain((int)g_web.arg("v").toInt(), 0, 100);
-        map_client_set_opacity(g_mapOpa);
-        radar::setMapOpacity(g_mapOpa);
+        radar::setMapOpacity(g_mapOpa);   // instant, and never touches the tiles
         if (g_web.hasArg("save")) {
             Preferences p;
             p.begin("capsuleradar", false);
@@ -1602,6 +1600,9 @@ void setup() {
         radar::setFiresEnabled(g_showFires);
         radar::setTrafficMode(g_trafficMode);
         radar::setTypeIcons(g_typeIcons);
+        radar::setMapOpacity(g_mapOpa);   // the saved value never reached the LVGL layer,
+                                          // so visibility only took effect once the
+                                          // slider was touched
         g_adsb.setHideGround(g_hideGround);
         g_adsb.setMinAltFt((float)g_minAltFt);
         g_adsb.setMilitaryOnly(g_milOnly);

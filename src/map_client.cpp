@@ -87,19 +87,9 @@ void map_client_set_style(int style) {
 }
 int map_client_style(void) { return s_style; }
 
-static int s_opacity = 85;
-
-void map_client_set_opacity(int percent) {
-    if (percent < 0)   percent = 0;
-    if (percent > 100) percent = 100;
-    if (percent == s_opacity) return;
-    s_opacity = percent;
-    if (s_mosaic && s_state == MAP_IDLE) {
-        s_state = MAP_COMPOSE;
-        s_composeRow = 0;
-    }
-}
-int map_client_opacity(void) { return s_opacity; }
+// Basemap visibility deliberately does NOT live here any more. It is a display
+// property, applied as LVGL image alpha in radar_view, so it is instant, costs no
+// refetch, and is reversible. See compose() above.
 
 // --- Web Mercator helpers (world pixel space at the active zoom) ---------------
 static inline double world_size(int z) { return (double)MAP_TILE_PX * (double)(1 << z); }
@@ -278,13 +268,14 @@ static void compose_band(int y0, int rows) {
             int my = (int)(wy - originY);
             if (mx < 0 || mx >= s_mosaicW || my < 0 || my >= s_mosaicH) { row[px] = 0; continue; }
 
-            // Scale the basemap brightness dynamically using s_opacity (0..100%).
-            const uint16_t c = s_mosaic[(size_t)my * s_mosaicW + mx];
-            const uint32_t scale = (uint32_t)s_opacity;
-            const uint32_t r5 = (((uint32_t)((c >> 11) & 0x1F)) * scale) / 100;
-            const uint32_t g6 = (((uint32_t)((c >> 5) & 0x3F)) * scale) / 100;
-            const uint32_t b5 = (((uint32_t)(c & 0x1F)) * scale) / 100;
-            row[px] = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
+            // Store the tile at full brightness. Visibility is applied later as LVGL
+            // image alpha, NOT baked in here.
+            //
+            // Baking it was destructive and could not be undone: composing at 0% wrote a
+            // black image, and raising the slider afterwards could not restore it because
+            // the source mosaic is freed once a build completes. That is exactly why the
+            // slider "worked" at 0% and then left the map dark at 100%.
+            row[px] = s_mosaic[(size_t)my * s_mosaicW + mx];
         }
     }
 }

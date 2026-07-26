@@ -10,8 +10,8 @@ void map_client_enable(bool on);
 bool map_client_enabled(void);
 void map_client_set_style(int style);      // 0 = dark, 1 = light
 int  map_client_style(void);
-void map_client_set_opacity(int percent);  // 0..100 (%)
-int  map_client_opacity(void);
+// Basemap visibility is a display property, not a tile property: see
+// radar::setMapOpacity(). Baking it into the pixels here was destructive.
 
 // Ask for a background for this scope. A no-op if one is already built or in flight
 // for the same geometry; any change restarts the build.
