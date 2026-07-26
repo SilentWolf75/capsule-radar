@@ -66,11 +66,11 @@
 // masks the angular stepping, so shortening it exposed the very judder it was meant to
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
-#define SWEEP_PERIOD_MS   8000
-#define SWEEP_FRAME_MS    30
-#define SWEEP_TRAIL_DEG   38.0f
-#define SWEEP_TRAIL_STEPS 20
-#define SWEEP_TRAIL_OPA   72
+#define SWEEP_PERIOD_MS   2800
+#define SWEEP_FRAME_MS    25
+#define SWEEP_TRAIL_DEG   42.0f
+#define SWEEP_TRAIL_STEPS 22
+#define SWEEP_TRAIL_OPA   120
 
 // ---- aircraft / flow / orb config ----
 #define TRAIL_MAX         7
@@ -617,6 +617,27 @@ static void ac_draw_cb(lv_event_t *e) {
             }
         } else {
             draw_trail(d, ac, ac.color);
+
+            // Target Phosphor Glow: illuminate target when sweep beam passes over it
+            if (s_sweepEnabled) {
+                const float dx = (float)(ac.pos.x - s_cx);
+                const float dy = (float)(ac.pos.y - s_cy);
+                float acDeg = atan2f(dy, dx) * 180.0f / (float)M_PI + 90.0f;
+                if (acDeg < 0.0f) acDeg += 360.0f;
+                float delta = fmodf(s_sweepDeg - acDeg + 360.0f, 360.0f);
+                if (delta < 50.0f) {
+                    float glowFrac = 1.0f - (delta / 50.0f);
+                    lv_draw_arc_dsc_t glow;
+                    lv_draw_arc_dsc_init(&glow);
+                    glow.color = ac.color;
+                    glow.width = (uint16_t)(2 + (uint16_t)(glowFrac * 4.0f));
+                    glow.opa = (lv_opa_t)(glowFrac * glowFrac * 220.0f);
+                    if (glow.opa > 10) {
+                        lv_draw_arc(d, &glow, &ac.pos, 13, 0, 360);
+                    }
+                }
+            }
+
             const float th = ((ac.track != ac.track) ? 0.0f : ac.track) * (float)M_PI / 180.0f;
             const float c = cosf(th), s = sinf(th);
 
