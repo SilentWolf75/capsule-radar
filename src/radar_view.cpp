@@ -1087,7 +1087,7 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         d.bearingDeg = (float)brg;
         d.lat = ac.lat;
         d.lon = ac.lon;
-        d.cat = (uint8_t)aircraft_category(ac.type.c_str());
+        d.cat = (uint8_t)aircraft_category(ac.type.c_str(), ac.altBaro, ac.gs);
         d.squawk = ac.squawk;
         if (ac.onGround) snprintf(d.altTxt, sizeof(d.altTxt), "GND");
         else             snprintf(d.altTxt, sizeof(d.altTxt), "%.0f ft", (double)ac.altBaro);

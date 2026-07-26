@@ -19,5 +19,5 @@ enum AcCategory : uint8_t {
     AC_CAT_COUNT
 };
 
-// Longest-prefix match against the embedded table; AC_CAT_NARROW when nothing matches.
-AcCategory aircraft_category(const char *icaoType);
+// Longest-prefix match against the embedded table; fallback based on altitude/speed when unlisted.
+AcCategory aircraft_category(const char *icaoType, float altFt = 0.0f, float gsKt = 0.0f);

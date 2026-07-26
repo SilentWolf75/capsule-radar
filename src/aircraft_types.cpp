@@ -10,6 +10,20 @@
 struct TypeRule { const char *prefix; uint8_t cat; };
 
 static const TypeRule TYPE_RULES[] = {
+    // ---- specific light singles / twins (MUST PRECED C17 widebody & P3 turboprop) ----
+    {"C170", AC_CAT_LIGHT}, {"C172", AC_CAT_LIGHT}, {"C175", AC_CAT_LIGHT}, {"C177", AC_CAT_LIGHT},
+    {"C180", AC_CAT_LIGHT}, {"C182", AC_CAT_LIGHT}, {"C185", AC_CAT_LIGHT},
+    {"C150", AC_CAT_LIGHT}, {"C152", AC_CAT_LIGHT}, {"C140", AC_CAT_LIGHT}, {"C120", AC_CAT_LIGHT},
+    {"C206", AC_CAT_LIGHT}, {"C210", AC_CAT_LIGHT}, {"C310", AC_CAT_LIGHT}, {"C340", AC_CAT_LIGHT},
+    {"P28A", AC_CAT_LIGHT}, {"P28B", AC_CAT_LIGHT}, {"P28R", AC_CAT_LIGHT}, {"PA28", AC_CAT_LIGHT},
+    {"PA32", AC_CAT_LIGHT}, {"PA34", AC_CAT_LIGHT}, {"PA44", AC_CAT_LIGHT}, {"P32R", AC_CAT_LIGHT}, {"P34A", AC_CAT_LIGHT},
+
+    // ---- specific Cessna Citations (MUST PRECEDE C5 widebody) ----
+    {"C25A", AC_CAT_SMALLJET}, {"C25B", AC_CAT_SMALLJET}, {"C25C", AC_CAT_SMALLJET},
+    {"C500", AC_CAT_SMALLJET}, {"C510", AC_CAT_SMALLJET}, {"C525", AC_CAT_SMALLJET},
+    {"C550", AC_CAT_SMALLJET}, {"C560", AC_CAT_SMALLJET}, {"C56X", AC_CAT_SMALLJET},
+    {"C650", AC_CAT_SMALLJET}, {"C680", AC_CAT_SMALLJET}, {"C750", AC_CAT_SMALLJET},
+
     // ---- helicopters (before anything that shares a leading letter) ----
     {"EC1", AC_CAT_HELI}, {"EC2", AC_CAT_HELI}, {"EC3", AC_CAT_HELI},
     {"EC4", AC_CAT_HELI}, {"EC5", AC_CAT_HELI}, {"EC6", AC_CAT_HELI}, {"EC7", AC_CAT_HELI},
@@ -27,8 +41,6 @@ static const TypeRule TYPE_RULES[] = {
     {"AW16", AC_CAT_HELI}, {"AW18", AC_CAT_HELI}, {"AW89", AC_CAT_HELI},
     {"B06",  AC_CAT_HELI}, {"B407", AC_CAT_HELI}, {"B412", AC_CAT_HELI},
     {"B427", AC_CAT_HELI}, {"B429", AC_CAT_HELI}, {"B430", AC_CAT_HELI}, {"B505", AC_CAT_HELI},
-    // Bell 212/222/230/525 must be listed: otherwise the "B2" bomber rule below claims
-    // them and a news helicopter draws as a B-2.
     {"B212", AC_CAT_HELI}, {"B222", AC_CAT_HELI}, {"B230", AC_CAT_HELI}, {"B525", AC_CAT_HELI},
     {"BK17", AC_CAT_HELI}, {"BH06", AC_CAT_HELI},
     {"R22",  AC_CAT_HELI}, {"R44",  AC_CAT_HELI}, {"R66",  AC_CAT_HELI},
@@ -36,7 +48,7 @@ static const TypeRule TYPE_RULES[] = {
     {"MI2",  AC_CAT_HELI}, {"MI8",  AC_CAT_HELI}, {"MI17", AC_CAT_HELI}, {"MI24", AC_CAT_HELI},
     {"KA26", AC_CAT_HELI}, {"KA32", AC_CAT_HELI},
     {"MD5",  AC_CAT_HELI}, {"MD6",  AC_CAT_HELI},
-    {"V22",  AC_CAT_HELI},   // tiltrotor: rotor discs dominate the silhouette
+    {"V22",  AC_CAT_HELI},
     {"GAZL", AC_CAT_HELI}, {"LYNX", AC_CAT_HELI}, {"EXPL", AC_CAT_HELI},
 
     // ---- fighters / fast military jets ----
@@ -58,11 +70,9 @@ static const TypeRule TYPE_RULES[] = {
     {"ARCU", AC_CAT_GLIDER}, {"NIMB", AC_CAT_GLIDER}, {"JANU", AC_CAT_GLIDER},
     {"DUOD", AC_CAT_GLIDER}, {"SF25", AC_CAT_GLIDER},
 
-    // ---- turboprops (several must precede the light-aircraft prefixes) ----
+    // ---- turboprops ----
     {"C208", AC_CAT_TURBOPROP}, {"C212", AC_CAT_TURBOPROP}, {"C441", AC_CAT_TURBOPROP},
     {"C295", AC_CAT_TURBOPROP}, {"C130", AC_CAT_TURBOPROP}, {"C27J", AC_CAT_TURBOPROP},
-    // C-130J reports as C30J, not C130. Without this it falls past every turboprop rule
-    // and is caught by "C3" (Cessna 310/340) further below - a Hercules as a light twin.
     {"C30J", AC_CAT_TURBOPROP}, {"C130J", AC_CAT_TURBOPROP},
     {"C160", AC_CAT_TURBOPROP}, {"CN35", AC_CAT_TURBOPROP},
     {"AT4",  AC_CAT_TURBOPROP}, {"AT5",  AC_CAT_TURBOPROP}, {"AT7",  AC_CAT_TURBOPROP},
@@ -147,23 +157,28 @@ static const TypeRule TYPE_RULES[] = {
 
 static const int TYPE_RULES_N = (int)(sizeof(TYPE_RULES) / sizeof(TYPE_RULES[0]));
 
-AcCategory aircraft_category(const char *icaoType) {
-    if (!icaoType || !icaoType[0]) return AC_CAT_NARROW;
+AcCategory aircraft_category(const char *icaoType, float altFt, float gsKt) {
+    if (icaoType && icaoType[0]) {
+        char t[10];
+        int j = 0;
+        for (const char *p = icaoType; *p && j < (int)sizeof(t) - 1; ++p) {
+            if (*p == ' ' || *p == '-') continue;
+            t[j++] = (char)toupper((unsigned char)*p);
+        }
+        t[j] = 0;
 
-    // Normalise: uppercase, no spaces. Feed types are short, so a small buffer is plenty.
-    char t[10];
-    int j = 0;
-    for (const char *p = icaoType; *p && j < (int)sizeof(t) - 1; ++p) {
-        if (*p == ' ' || *p == '-') continue;
-        t[j++] = (char)toupper((unsigned char)*p);
+        if (j > 0) {
+            for (int i = 0; i < TYPE_RULES_N; ++i) {
+                const char *pre = TYPE_RULES[i].prefix;
+                if (strncmp(t, pre, strlen(pre)) == 0) return (AcCategory)TYPE_RULES[i].cat;
+            }
+        }
     }
-    t[j] = 0;
-    if (!j) return AC_CAT_NARROW;
 
-    // First match wins; the table is ordered specific -> general for exactly this reason.
-    for (int i = 0; i < TYPE_RULES_N; ++i) {
-        const char *pre = TYPE_RULES[i].prefix;
-        if (strncmp(t, pre, strlen(pre)) == 0) return (AcCategory)TYPE_RULES[i].cat;
+    // Smart fallback when type code is unlisted or missing:
+    // Low altitude / low speed traffic is predominantly light general aviation.
+    if ((altFt > 0.0f && altFt < 12000.0f) || (gsKt > 0.0f && gsKt < 210.0f)) {
+        return AC_CAT_LIGHT;
     }
     return AC_CAT_NARROW;
 }
