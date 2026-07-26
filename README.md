@@ -17,9 +17,9 @@ It also does weather, a continental wildfire map, marine traffic, a clock face, 
 itself over WiFi.
 
 <p align="center">
-  <img src="docs/img/screens/radar.png" width="380" alt="SkyGlass scope with 18 aircraft in range">
+  <img src="docs/img/tour.gif" width="340" alt="SkyGlass cycling through its screens">
 </p>
-<p align="center"><sub>18 aircraft in range over Kansas City — Delta, SkyWest, Mesa, Southwest and a NetJets bizjet, each drawn by type, coloured by altitude, over a CARTO basemap with four airports labelled.</sub></p>
+<p align="center"><sub>Every screen, captured off the device: 18 aircraft in range over Kansas City — Delta, SkyWest, Mesa, Southwest and a NetJets bizjet — then the detail card, contact list, a tracked 767, the fire map, weather and About.</sub></p>
 
 ## Screens
 
@@ -53,11 +53,12 @@ Every image on this page is the **real framebuffer from my device**, pulled over
 
 ### Themes
 
-Long-press the screen to cycle, or pick one on the config page. All four captured on the device:
+Long-press the screen to cycle, or pick one on the config page — **Phosphor**, **Orb**,
+**Amber CRT** and **Military**, all four captured on the device with the same traffic overhead:
 
-| Phosphor | Orb | Amber CRT | Military |
-|:--:|:--:|:--:|:--:|
-| <img src="docs/img/theme-phosphor.png" width="200"> | <img src="docs/img/theme-orb.png" width="200"> | <img src="docs/img/theme-amber.png" width="200"> | <img src="docs/img/theme-military.png" width="200"> |
+<p align="center">
+  <img src="docs/img/themes.gif" width="300" alt="The four themes cycling">
+</p>
 
 ## Features
 
@@ -199,6 +200,12 @@ python tools/grab_screens.py skyglass.local docs/img/screens
 
 It drives the firmware's own `/view` and `/shot.bmp` endpoints, so it can select a contact,
 track a flight and switch screens without anyone standing at the device.
+
+The animated GIFs on this page are assembled from those stills by `tools/make_gif.py`
+(the one tool here that needs Pillow). There is no sweep animation for a good reason:
+`/shot.bmp` takes about 2.3 s per frame over WiFi against a ~5 s sweep, which samples
+roughly two frames per rotation — a stutter rather than motion. Cycling whole screens is
+honest at that capture rate and shows more anyway.
 
 ## Desktop simulator
 
