@@ -15,6 +15,8 @@
 #include "airline.h"
 #include "wildfire.h"
 #include "wildfire_client.h"
+#include "firemap.h"
+#include "firemap_client.h"
 #include "map_bg.h"
 #include "map_client.h"
 #include "vessel.h"
@@ -303,6 +305,14 @@ static void adsb_task(void*) {
             }
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
+            // Continental fire map (FIRES screen). Fetch + banded parse; returns
+            // true while busy so the UI can repaint on the busy->idle edge.
+            {
+                static bool fmWasBusy = false;
+                const bool fmBusy = firemap_client_step();
+                if (fmWasBusy && !fmBusy) g_firesDirty = true;
+                fmWasBusy = fmBusy;
+            }
             // Self-update. Deliberately last in the task: a check is cheap but an
             // install streams 3 MB, and the live feed should have had its turn first.
             updater_poll();
@@ -1371,7 +1381,7 @@ static void handleShot() {
 }
 
 static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock)
-    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 5));
+    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 6));   // 6 = fires
     if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
     if (g_web.hasArg("icon")) ui_preview_weather_icon(g_web.arg("icon").toInt());
     if (g_web.hasArg("mil")) radar::setMilitaryPreview(g_web.arg("mil").toInt() != 0);
@@ -1515,6 +1525,7 @@ void setup() {
 
     loadSettings();
     updater_begin();       // restore the auto-check / auto-install preferences
+    firemap_begin();       // continental fire map starts on the default view
     route_cache_begin();   // clear stale route cache if the label format changed
 
     // --- Display + LVGL (M0) ----------------------------------------------
@@ -1722,6 +1733,9 @@ void loop() {
         g_firesDirty = false;
         g_mapDirty = false;
         radar::update(g_snap, g_settings);   // re-project fires / bind a new basemap image
+        ui_on_data_updated();                // ...and refresh the FIRES tile's counts, which
+                                             // otherwise kept showing "fetching..." under a
+                                             // map that had already drawn
     }
 
     // periodic: HUD clock + wifi/battery indicators

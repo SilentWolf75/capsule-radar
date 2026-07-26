@@ -21,6 +21,7 @@ void wildfire_set_key(const char *mapKey) {
 }
 
 bool wildfire_has_key(void) { return s_key[0] != 0; }
+const char *wildfire_map_key(void) { return s_key; }
 
 // Return the index of `name` among the comma-separated header fields, or -1.
 static int csv_col(const char *header, size_t len, const char *name) {

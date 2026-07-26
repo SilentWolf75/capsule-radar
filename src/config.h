@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.9.2"    // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.10.2"    // shown on the web config page + Stats screen; bump on release
 // Edit pins below: replace every -1 with the value from the Waveshare factory demo
 // (see docs/HARDWARE.md and docs/SETUP.md). Do NOT guess them.
 
@@ -30,6 +30,9 @@ static const float RANGE_STEPS_KM[] = {10.0f, 20.0f, 30.0f, 50.0f, 100.0f};
 #define WX_RADAR_REFRESH_MS 300000UL       // RainViewer frames update about every 5 minutes
 #define CLOUD_IMAGE_REFRESH_MS 600000UL    // EUMETSAT MTG cloud imagery; cache for 10 minutes
 #define FIRE_DAY_RANGE      2              // see wildfire_client.cpp: 1 always returns nothing
+#define FIREMAP_REFRESH_MS  900000UL       // continental fire map; a big query, poll it slowly
+#define FIREMAP_HALF_W      205            // draw box for the continental map (fits the circle)
+#define FIREMAP_HALF_H      138
 #define FIRE_REFRESH_MS     900000UL       // NASA FIRMS active fires; new satellite passes are hours apart
 
 // ---------- Screen (CO5300 AMOLED) ----------

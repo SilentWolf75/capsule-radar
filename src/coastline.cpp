@@ -69,3 +69,69 @@ void coastline_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_coord
         }
     }
 }
+
+// --- rectangular projection (continental fire map) --------------------------------
+// Separate cache from the radar projection above: both can be live at once, and this
+// one only changes when the map view changes (a tap), not per frame.
+static std::vector<std::vector<lv_point_t>> s_rectLines;
+
+void coastline_project_rect(double west, double south, double east, double north,
+                            lv_coord_t cx, lv_coord_t cy,
+                            lv_coord_t halfW, lv_coord_t halfH) {
+    s_rectLines.clear();
+    if (east <= west || north <= south) return;
+
+    // Longitude compressed by cos(mid-latitude), and the whole box fitted inside the
+    // draw area preserving aspect - otherwise the continent renders as a wide smear.
+    const double midLat = (south + north) * 0.5, midLon = (west + east) * 0.5;
+    double k = cos(midLat * M_PI / 180.0);
+    if (k < 0.2) k = 0.2;
+    const double wDeg = (east - west) * k, hDeg = north - south;
+    const double sx = 2.0 * halfW / wDeg, sy = 2.0 * halfH / hDeg;
+    const double s = (sx < sy) ? sx : sy;
+
+    const int16_t *p = COAST_PTS;
+    for (int poly = 0; poly < COAST_NUM_POLYS; ++poly) {
+        const int n = COAST_POLY_LEN[poly];
+        std::vector<lv_point_t> run;
+        for (int i = 0; i < n; ++i) {
+            const double lat = p[i * 2]     / (double)COAST_SCALE;
+            const double lon = p[i * 2 + 1] / (double)COAST_SCALE;
+            // Margin so coastlines entering the view are not clipped mid-stroke.
+            if (lat < south - 4 || lat > north + 4 || lon < west - 6 || lon > east + 6) {
+                if (run.size() > 1) s_rectLines.push_back(run);
+                run.clear();
+                continue;
+            }
+            lv_point_t sp;
+            sp.x = (lv_coord_t)lround(cx + (lon - midLon) * k * s);
+            sp.y = (lv_coord_t)lround(cy - (lat - midLat) * s);
+            // Decimate. At continental scale one pixel spans a third of a degree, so
+            // consecutive source points land on top of each other: keeping them all
+            // produced ~100k segments per frame, which stalled the render entirely.
+            // Dropping anything within 2 px of the last kept point is invisible here and
+            // cuts the work by more than an order of magnitude.
+            if (!run.empty()) {
+                const lv_coord_t dx = (lv_coord_t)(sp.x - run.back().x);
+                const lv_coord_t dy = (lv_coord_t)(sp.y - run.back().y);
+                if (dx * dx + dy * dy < 4) continue;
+            }
+            run.push_back(sp);
+        }
+        if (run.size() > 1) s_rectLines.push_back(run);
+        p += n * 2;
+    }
+}
+
+void coastline_draw_rect(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_coord_t width) {
+    if (s_rectLines.empty()) return;
+    lv_draw_line_dsc_t d;
+    lv_draw_line_dsc_init(&d);
+    d.color = color; d.opa = opa; d.width = width;
+    for (const auto &line : s_rectLines) {
+        for (size_t i = 1; i < line.size(); ++i) {
+            lv_point_t a = line[i - 1], b = line[i];
+            lv_draw_line(ctx, &d, &a, &b);
+        }
+    }
+}

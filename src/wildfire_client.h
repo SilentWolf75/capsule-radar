@@ -5,4 +5,5 @@
 
 void wildfire_set_key(const char *mapKey);   // "" disables the feature
 bool wildfire_has_key(void);
+const char *wildfire_map_key(void);   // FIRMS key, for clients that build their own URLs
 bool wildfire_fetch(double lat, double lon, float radiusKm);

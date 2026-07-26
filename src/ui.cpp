@@ -6,6 +6,8 @@
 #include "photo.h"
 #include "airline.h"
 #include "weather_icons.h"
+#include "firemap.h"
+#include "coastline.h"
 #include "vessel.h"
 #include "wildfire.h"
 #include "weather.h"
@@ -954,6 +956,107 @@ static void track_btn_cb(lv_event_t *) {
     build_tracked();
 }
 
+// ------------------------------------------------------------------- fires tile
+// A continental fire map. Deliberately not the radar scope: wildfires are a regional
+// phenomenon and the scope's range would have to be absurd to show any. Coastline comes
+// from the same embedded dataset the radar uses, so the map needs no network at all.
+static lv_obj_t *s_tileFires = nullptr, *s_fireLayer = nullptr;
+static lv_obj_t *s_fireTitle = nullptr, *s_fireInfo = nullptr, *s_fireBack = nullptr;
+static uint32_t  s_fireSeen = 0;
+
+static void fire_draw_cb(lv_event_t *e) {
+    lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+    const lv_coord_t cx = SCREEN_CX, cy = SCREEN_CY + 8;
+
+    coastline_draw_rect(d, lv_color_hex(0x2E5C86), 150, 1);
+
+    // Cells are drawn largest-first so a big hotspot never hides under a small one.
+    const int n = firemap_cell_count();
+    for (int pass = 1; pass >= 0; --pass) {
+        for (int i = 0; i < n; ++i) {
+            FireCell c;
+            if (!firemap_cell(i, &c)) continue;
+            const bool big = (c.frp >= 200.0f || c.count >= 12);
+            if ((pass == 1) != big) continue;
+
+            lv_point_t p;
+            firemap_project(c.lat, c.lon, cx, cy, FIREMAP_HALF_W, FIREMAP_HALF_H, &p);
+
+            const bool mid = (c.frp >= 50.0f || c.count >= 4);
+            const lv_coord_t r = big ? 6 : (mid ? 4 : 2);
+            lv_draw_rect_dsc_t dot;
+            lv_draw_rect_dsc_init(&dot);
+            dot.radius = LV_RADIUS_CIRCLE;
+            dot.bg_opa = LV_OPA_COVER;
+            dot.bg_color = big ? lv_color_hex(0xFF3B1F)
+                               : (mid ? lv_color_hex(0xFF7A18) : lv_color_hex(0xFFC24D));
+            lv_area_t a = { (lv_coord_t)(p.x - r), (lv_coord_t)(p.y - r),
+                            (lv_coord_t)(p.x + r), (lv_coord_t)(p.y + r) };
+            lv_draw_rect(d, &dot, &a);
+            if (big) {
+                lv_draw_arc_dsc_t halo;
+                lv_draw_arc_dsc_init(&halo);
+                halo.color = dot.bg_color; halo.width = 2; halo.opa = 70;
+                lv_draw_arc(d, &halo, &p, (uint16_t)(r + 5), 0, 360);
+            }
+        }
+    }
+}
+
+static void build_fires(void) {
+    if (!s_fireTitle) return;
+    const bool zoomed = firemap_is_zoomed();
+    lv_label_set_text(s_fireTitle, zoomed ? "FIRES - AREA" : "FIRES - N AMERICA");
+    if (zoomed) lv_obj_clear_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
+    else        lv_obj_add_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
+
+    const int total = firemap_total(), cells = firemap_cell_count();
+    char info[72];
+    if (cells == 0) snprintf(info, sizeof(info), "%s", firemap_status());
+    else            snprintf(info, sizeof(info), "%d detections  %s  %d areas",
+                             total, LV_SYMBOL_BULLET, cells);
+    lv_label_set_text(s_fireInfo, info);
+
+    // Reproject the coastline only when the view actually changed - it walks 293k
+    // points, which is far too expensive to repeat per frame.
+    static double pw = 1e9, ps = 1e9, pe = 1e9, pn = 1e9;
+    FireView v; firemap_get_view(&v);
+    if (v.west != pw || v.south != ps || v.east != pe || v.north != pn) {
+        pw = v.west; ps = v.south; pe = v.east; pn = v.north;
+        coastline_project_rect(v.west, v.south, v.east, v.north,
+                               SCREEN_CX, SCREEN_CY + 8, FIREMAP_HALF_W, FIREMAP_HALF_H);
+    }
+    if (s_fireLayer) lv_obj_invalidate(s_fireLayer);
+}
+
+static void fire_tap_cb(lv_event_t *e) {
+    (void)e;
+    if (firemap_is_zoomed()) return;              // already zoomed; use Back
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev) return;
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+
+    double lat, lon;
+    firemap_unproject(p.x, p.y, SCREEN_CX, SCREEN_CY + 8,
+                      FIREMAP_HALF_W, FIREMAP_HALF_H, &lat, &lon);
+
+    // Zoom to a box around the tap. Wide enough to keep context, tight enough that the
+    // finer VIIRS product is worth fetching.
+    FireView v;
+    v.west  = lon - 6.0; v.east  = lon + 6.0;
+    v.south = lat - 4.5; v.north = lat + 4.5;
+    firemap_set_view(&v);
+    build_fires();
+}
+
+static void fire_back_cb(lv_event_t *e) {
+    (void)e;
+    FireView v; firemap_default_view(&v);
+    firemap_set_view(&v);
+    build_fires();
+}
+
 // ------------------------------------------------------------------ clock tile
 // Big watch-face view: time + date, current conditions, and a compact 3-day strip.
 // The time/date refresh runs on its own 1 s LVGL timer; the weather part is rebuilt
@@ -1029,6 +1132,7 @@ static void refresh_active_tile(void) {
     else if (act == s_tileStats) build_stats();
     else if (act == s_tileWeather) build_weather();
     else if (act == s_tileClock) build_clock_weather();
+    else if (act == s_tileFires) build_fires();
     else if (act == s_tileTracked) build_tracked();
 }
 
@@ -1177,7 +1281,7 @@ static void build_card(void) {
 }
 
 void ui_show_view(int idx) {
-    if (s_tv && idx >= 0 && idx <= 5) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
+    if (s_tv && idx >= 0 && idx <= 6) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
 }
 
 // ------------------------------------------------------------------- splash
@@ -1260,7 +1364,8 @@ void ui_create(void) {
     s_tileStats = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
     s_tileWeather = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
     s_tileTracked = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);
-    s_tileClock = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);
+    s_tileClock = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_HOR);
+    s_tileFires = lv_tileview_add_tile(s_tv, 6, 0, LV_DIR_LEFT);
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) { refresh_active_tile(); }, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1759,6 +1864,44 @@ void ui_create(void) {
         lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], 146);
     }
     lv_timer_create(clock_tick_cb, 1000, nullptr);
+
+    // --- fires tile (continental map) ---
+    lv_obj_t *fp = make_round_panel(s_tileFires);
+    lv_obj_set_style_bg_color(fp, lv_color_black(), 0);
+    s_fireTitle = make_tile_title(fp, "FIRES - N AMERICA");
+
+    s_fireLayer = lv_obj_create(fp);
+    lv_obj_remove_style_all(s_fireLayer);
+    lv_obj_set_size(s_fireLayer, SCREEN_W, SCREEN_H);
+    lv_obj_center(s_fireLayer);
+    lv_obj_add_flag(s_fireLayer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_fireLayer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_fireLayer, fire_draw_cb, LV_EVENT_DRAW_MAIN, nullptr);
+    lv_obj_add_event_cb(s_fireLayer, fire_tap_cb, LV_EVENT_CLICKED, nullptr);
+
+    s_fireInfo = lv_label_create(fp);
+    lv_obj_set_width(s_fireInfo, 380);
+    lv_obj_set_style_text_font(s_fireInfo, F14(), 0);
+    lv_obj_set_style_text_color(s_fireInfo, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_fireInfo, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_fireInfo, "waiting for data...");
+    lv_obj_align(s_fireInfo, LV_ALIGN_BOTTOM_MID, 0, -54);
+
+    s_fireBack = lv_btn_create(fp);
+    lv_obj_set_size(s_fireBack, 130, 34);
+    lv_obj_align(s_fireBack, LV_ALIGN_BOTTOM_MID, 0, -16);
+    lv_obj_set_style_radius(s_fireBack, 17, 0);
+    lv_obj_set_style_bg_color(s_fireBack, UI_PANEL, 0);
+    lv_obj_set_style_border_color(s_fireBack, UI_GREEN, 0);
+    lv_obj_set_style_border_width(s_fireBack, 1, 0);
+    lv_obj_clear_flag(s_fireBack, LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_event_cb(s_fireBack, fire_back_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *bl = lv_label_create(s_fireBack);
+    lv_obj_set_style_text_font(bl, F12(), 0);
+    lv_obj_set_style_text_color(bl, UI_GREEN, 0);
+    lv_label_set_text(bl, "WHOLE MAP");
+    lv_obj_center(bl);
 
     lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);
 
