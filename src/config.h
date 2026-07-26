@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.10.27"   // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.10.28"   // shown on the web config page + Stats screen; bump on release
 // Edit pins below: replace every -1 with the value from the Waveshare factory demo
 // (see docs/HARDWARE.md and docs/SETUP.md). Do NOT guess them.
 
@@ -13,11 +13,9 @@
 // ---------- Radar ----------
 #define RANGE_KM_DEFAULT    30.0f          // display range (outer ring). Query is wider, see below.
 // Feed query radius = display range × MULT, clamped to [MIN, MAX]. Querying a bit wider than
-// the display shows off-range traffic as edge arrows. The floor MUST stay small: the old 50 km
-// floor made small display ranges still pull a huge aircraft list in busy airspace, which timed
-// out the poll (feed permanently amber near big hubs). Fix contributed by @alexzogh (STLWarehouse).
-#define ADSB_QUERY_MULT     1.4f
-#define ADSB_QUERY_MIN_KM   12.0f
+// the display shows off-range traffic as edge arrows.
+#define ADSB_QUERY_MULT     1.6f
+#define ADSB_QUERY_MIN_KM   20.0f
 #define ADSB_QUERY_MAX_KM   150.0f
 static const float RANGE_STEPS_KM[] = {10.0f, 20.0f, 30.0f, 50.0f, 100.0f};
 #define POLL_INTERVAL_MS    2000           // be gentle with the free API (>=1000)
@@ -55,7 +53,7 @@ static const float RANGE_STEPS_KM[] = {10.0f, 20.0f, 30.0f, 50.0f, 100.0f};
 #define ADSB_FALLBACK_HOST  "api.adsb.lol"          // same readsb format
 #define ADSB_USER_AGENT     "CapsuleRadar/1.0 (ESP32-S3 hobby; +https://github.com/socquique/capsule-radar)"
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
-#define ADSB_MAX_AIRCRAFT   60              // hard cap parsed per poll (protect RAM in busy areas)
+#define ADSB_MAX_AIRCRAFT   120             // hard cap parsed per poll (protect RAM in busy areas)
 
 // ---------- Self-update (GitHub Pages, published by the web-flasher workflow) ----------
 // The workflow stamps manifest.json with FW_VERSION and publishes firmware.bin beside

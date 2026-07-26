@@ -154,15 +154,11 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
         float altFt = 0.0f;
         if (a["alt_baro"].is<const char*>()) {
             const char* s = a["alt_baro"].as<const char*>();
-            if (s && (strcmp(s, "ground") == 0 || strcmp(s, "GROUND") == 0)) onGround = true;
-        } else if (a["alt_baro"].is<float>()) {
-            altFt = a["alt_baro"].as<float>();
-        } else if (a["alt_baro"].is<int>()) {
-            altFt = (float)a["alt_baro"].as<int>();
-        } else if (a["alt_geom"].is<float>()) {
-            altFt = a["alt_geom"].as<float>();
-        } else if (a["alt_geom"].is<int>()) {
-            altFt = (float)a["alt_geom"].as<int>();
+            if (s && (strcasecmp(s, "ground") == 0)) onGround = true;
+        }
+        if (!onGround) {
+            if (!a["alt_baro"].isNull())     altFt = a["alt_baro"].as<float>();
+            else if (!a["alt_geom"].isNull()) altFt = a["alt_geom"].as<float>();
         }
 
         if (_hideGround && onGround) continue;
@@ -189,10 +185,12 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
         ac.lat = lat; ac.lon = lon;
         ac.onGround = onGround;
         ac.altBaro  = altFt;
-        ac.track    = a["track"].is<float>() ? a["track"].as<float>() : (a["true_heading"] | NAN);
-        ac.gs       = a["gs"] | NAN;
-        ac.baroRate = a["baro_rate"] | NAN;
-        ac.squawk   = a["squawk"].is<const char*>() ? atoi(a["squawk"]) : (a["squawk"] | -1);
+        ac.track    = !a["track"].isNull() ? a["track"].as<float>() : (!a["true_heading"].isNull() ? a["true_heading"].as<float>() : NAN);
+        ac.gs       = !a["gs"].isNull() ? a["gs"].as<float>() : NAN;
+        ac.baroRate = !a["baro_rate"].isNull() ? a["baro_rate"].as<float>() : NAN;
+        if (a["squawk"].is<const char*>()) ac.squawk = atoi(a["squawk"].as<const char*>());
+        else if (!a["squawk"].isNull())    ac.squawk = a["squawk"].as<int>();
+        else                               ac.squawk = -1;
         ac.seenPos  = a["seen_pos"] | 0;
         ac.military = ((a["dbFlags"] | 0u) & 0x1) != 0;
         ac.lastUpdateMs = now;
