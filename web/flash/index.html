@@ -6,38 +6,108 @@
 <title>Capsule Radar — Web Flasher</title>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 <style>
-  :root { --green:#1dff86; --soft:#9affc8; --ink:#eafff3; }
+  :root { --green:#1dff86; --soft:#9affc8; --ink:#eafff3; --dark:#0a1a12; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; padding: 32px 18px;
-    background: radial-gradient(circle at 50% 30%, #0a1f15 0%, #04100a 70%, #020805 100%);
+    margin: 0; min-height: 100vh; padding: 36px 18px;
+    background: radial-gradient(circle at 50% 25%, #0b2217 0%, #04120b 65%, #020704 100%);
     color: var(--ink); font-family: system-ui, -apple-system, Segoe UI, sans-serif;
     display: flex; flex-direction: column; align-items: center; text-align: center;
   }
-  h1 { color: var(--green); font-size: 26px; margin: 8px 0 2px; letter-spacing: .5px; }
-  .sub { color: var(--soft); font-size: 14px; margin-bottom: 28px; }
+  
+  /* --- Realistic Firmware Radar Scope --- */
+  .scope-container {
+    position: relative; width: 140px; height: 140px; margin: 0 auto 16px;
+    border-radius: 50%; padding: 6px;
+    background: linear-gradient(145deg, #1b3829 0%, #06140c 100%);
+    box-shadow: 0 0 30px rgba(29, 255, 134, 0.25), inset 0 2px 4px rgba(255,255,255,0.1), 0 12px 28px rgba(0,0,0,0.8);
+  }
+  .scope {
+    position: relative; width: 100%; height: 100%; border-radius: 50%; background: #000;
+    overflow: hidden; border: 1.5px solid rgba(29, 255, 134, 0.7);
+    box-shadow: inset 0 0 20px rgba(0, 40, 20, 0.8);
+  }
+  .scope-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  
+  /* Rotating Sweep Wedge */
+  .sweep-beam {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(29, 255, 134, 0.55) 0deg, rgba(29, 255, 134, 0.08) 50deg, transparent 65deg);
+    animation: radar-sweep 3.6s linear infinite; transform-origin: center;
+  }
+  @keyframes radar-sweep { to { transform: rotate(360deg); } }
+
+  /* CRT Scanlines Overlay */
+  .scope::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.25) 2px 3px);
+    mix-blend-mode: multiply; opacity: 0.6;
+  }
+  
+  /* Target Aircraft Blips */
+  .blip {
+    position: absolute; width: 5px; height: 5px; background: var(--green); border-radius: 50%;
+    box-shadow: 0 0 6px var(--green); animation: blip-pulse 3.6s ease-out infinite;
+  }
+  .blip1 { top: 32%; left: 62%; animation-delay: 0.6s; }
+  .blip2 { top: 68%; left: 34%; animation-delay: 1.8s; }
+  .blip3 { top: 45%; left: 28%; animation-delay: 2.7s; }
+
+  @keyframes blip-pulse {
+    0% { opacity: 0; transform: scale(0.6); }
+    10% { opacity: 1; transform: scale(1.4); }
+    25% { opacity: 0.9; transform: scale(1); }
+    100% { opacity: 0.15; transform: scale(0.8); }
+  }
+
+  /* Badge & Headers */
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px;
+    background: rgba(13, 31, 21, 0.8); border: 1px solid rgba(29, 255, 134, 0.3);
+    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--green); margin-bottom: 10px;
+  }
+  .status-dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); animation: dot-blink 1.8s infinite; }
+  @keyframes dot-blink { 50% { opacity: 0.3; } }
+
+  h1 { color: var(--green); font-size: 28px; margin: 0 0 4px; letter-spacing: 1px; font-weight: 800; text-shadow: 0 0 12px rgba(29,255,134,0.3); }
+  .sub { color: var(--soft); font-size: 14px; margin-bottom: 24px; opacity: 0.9; }
   .card {
-    background: rgba(10,22,15,.85); border: 1px solid #1f3a2b; border-radius: 16px;
+    background: rgba(10,22,15,.88); border: 1px solid #1f3a2b; border-radius: 16px;
     padding: 26px 22px; max-width: 460px; width: 100%; margin-bottom: 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   }
   esp-web-install-button { --esp-tools-button-color: #04140b; --esp-tools-button-background-color: var(--green); }
   ol { text-align: left; color: var(--soft); font-size: 14px; line-height: 1.6; padding-left: 20px; }
-  code { background:#0c1a12; padding:2px 6px; border-radius:6px; color:var(--ink); }
-  .note { color:#7fae97; font-size:12px; margin-top:18px; }
-  a { color: var(--green); }
-  .radar { width: 92px; height: 92px; border-radius: 50%; border: 2px solid var(--green);
-           position: relative; margin: 0 auto 14px; box-shadow: 0 0 22px rgba(29,255,134,.35); }
-  .radar::before { content:""; position:absolute; inset:0; border-radius:50%;
-    background: conic-gradient(from 0deg, rgba(29,255,134,.55), transparent 60%); animation: spin 3.2s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  code { background:#0c1a12; padding:2px 6px; border-radius:6px; color:var(--ink); border: 1px solid #1a3525; }
+  .note { color:#7fae97; font-size:12px; margin-top:18px; line-height: 1.5; }
+  a { color: var(--green); text-decoration: none; }
+  a:hover { text-decoration: underline; }
   .ver { color:var(--soft); font-size:13px; margin-top:14px; }
   .ver b { color: var(--green); }
 </style>
 </head>
 <body>
-  <div class="radar"></div>
+  <div class="scope-container">
+    <div class="scope">
+      <svg class="scope-svg" viewBox="0 0 100 100">
+        <!-- Range Rings -->
+        <circle cx="50" cy="50" r="16" fill="none" stroke="rgba(29,255,134,0.22)" stroke-width="0.7" stroke-dasharray="2,2"/>
+        <circle cx="50" cy="50" r="32" fill="none" stroke="rgba(29,255,134,0.22)" stroke-width="0.7"/>
+        <circle cx="50" cy="50" r="47" fill="none" stroke="rgba(29,255,134,0.3)" stroke-width="1"/>
+        <!-- Reticle Axes -->
+        <line x1="50" y1="3" x2="50" y2="97" stroke="rgba(29,255,134,0.25)" stroke-width="0.6" stroke-dasharray="1.5,1.5"/>
+        <line x1="3" y1="50" x2="97" y2="50" stroke="rgba(29,255,134,0.25)" stroke-width="0.6" stroke-dasharray="1.5,1.5"/>
+      </svg>
+      <div class="sweep-beam"></div>
+      <div class="blip blip1"></div>
+      <div class="blip blip2"></div>
+      <div class="blip blip3"></div>
+    </div>
+  </div>
+
+  <div class="status-badge"><div class="status-dot"></div> Live ADS-B Radar</div>
   <h1>Capsule Radar</h1>
-  <div class="sub">Live ADS-B aircraft radar · Waveshare ESP32-S3-Touch-AMOLED-1.75</div>
+  <div class="sub">Waveshare ESP32-S3-Touch-AMOLED-1.75 Firmware Installer</div>
 
   <div class="card">
     <p style="margin-top:0">Flash the firmware straight from your browser — no toolchain, no PlatformIO.</p>
