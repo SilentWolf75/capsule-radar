@@ -18,3 +18,8 @@ void coastline_project_rect(double west, double south, double east, double north
                             lv_coord_t cx, lv_coord_t cy,
                             lv_coord_t halfW, lv_coord_t halfH);
 void coastline_draw_rect(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_coord_t width);
+
+void borders_project_rect(double west, double south, double east, double north,
+                          lv_coord_t cx, lv_coord_t cy,
+                          lv_coord_t halfW, lv_coord_t halfH);
+void borders_draw_rect(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_coord_t width);

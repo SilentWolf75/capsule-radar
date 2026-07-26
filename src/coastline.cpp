@@ -135,3 +135,60 @@ void coastline_draw_rect(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_
         }
     }
 }
+
+#include "borders_data.h"
+
+static std::vector<std::vector<lv_point_t>> s_borderLines;
+
+void borders_project_rect(double west, double south, double east, double north,
+                          lv_coord_t cx, lv_coord_t cy,
+                          lv_coord_t halfW, lv_coord_t halfH) {
+    s_borderLines.clear();
+    if (east <= west || north <= south) return;
+
+    const float midLat = (float)((south + north) * 0.5), midLon = (float)((west + east) * 0.5);
+    float k = cosf(midLat * (float)M_PI / 180.0f);
+    if (k < 0.2f) k = 0.2f;
+    const float wDeg = (float)(east - west) * k, hDeg = (float)(north - south);
+    const float sx = 2.0f * halfW / wDeg, sy = 2.0f * halfH / hDeg;
+    const float s = (sx < sy) ? sx : sy;
+
+    const int16_t *p = BORDER_PTS;
+    for (int poly = 0; poly < BORDER_NUM_POLYS; ++poly) {
+        const int n = BORDER_POLY_LEN[poly];
+        std::vector<lv_point_t> run;
+        for (int i = 0; i < n; ++i) {
+            const float lat = (float)p[i * 2]     / (float)BORDER_SCALE;
+            const float lon = (float)p[i * 2 + 1] / (float)BORDER_SCALE;
+            if (lat < (float)south - 4.0f || lat > (float)north + 4.0f || lon < (float)west - 6.0f || lon > (float)east + 6.0f) {
+                if (run.size() > 1) s_borderLines.push_back(run);
+                run.clear();
+                continue;
+            }
+            lv_point_t sp;
+            sp.x = (lv_coord_t)lroundf(cx + (lon - midLon) * k * s);
+            sp.y = (lv_coord_t)lroundf(cy - (lat - midLat) * s);
+            if (!run.empty()) {
+                const lv_coord_t dx = (lv_coord_t)(sp.x - run.back().x);
+                const lv_coord_t dy = (lv_coord_t)(sp.y - run.back().y);
+                if (dx * dx + dy * dy < 4) continue;
+            }
+            run.push_back(sp);
+        }
+        if (run.size() > 1) s_borderLines.push_back(run);
+        p += n * 2;
+    }
+}
+
+void borders_draw_rect(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa, lv_coord_t width) {
+    if (s_borderLines.empty()) return;
+    lv_draw_line_dsc_t d;
+    lv_draw_line_dsc_init(&d);
+    d.color = color; d.opa = opa; d.width = width;
+    for (const auto &line : s_borderLines) {
+        for (size_t i = 1; i < line.size(); ++i) {
+            lv_point_t a = line[i - 1], b = line[i];
+            lv_draw_line(ctx, &d, &a, &b);
+        }
+    }
+}

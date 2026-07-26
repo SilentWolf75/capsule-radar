@@ -1007,10 +1007,13 @@ static void fire_draw_cb(lv_event_t *e) {
     lv_draw_line(d, &ch, &h1, &h2);
     lv_draw_line(d, &ch, &v1, &v2);
 
-    // 3. Draw the coastline
-    coastline_draw_rect(d, lv_color_hex(0x2E5C86), 150, 1);
+    // 3. Draw US State Lines & Borders (subtle dark slate blue)
+    borders_draw_rect(d, lv_color_hex(0x1E3A52), 160, 1);
 
-    // 4. Draw active hot spots with pulsing radial heat glows
+    // 4. Draw Ocean Coastlines (vibrant cyan/teal)
+    coastline_draw_rect(d, lv_color_hex(0x38BDF8), 200, 2);
+
+    // 5. Draw active hot spots with pulsing radial heat glows
     const int n = firemap_cell_count();
     const float pulse = 0.8f + 0.2f * sinf((float)lv_tick_get() * 0.003f); // soft breathing pulse
 
@@ -1069,14 +1072,15 @@ static void build_fires(void) {
                              total, LV_SYMBOL_BULLET, cells);
     lv_label_set_text(s_fireInfo, info);
 
-    // Reproject the coastline only when the view actually changed - it walks 293k
-    // points, which is far too expensive to repeat per frame.
+    // Reproject the coastline and borders only when the view actually changed
     static double pw = 1e9, ps = 1e9, pe = 1e9, pn = 1e9;
     FireView v; firemap_get_view(&v);
     if (v.west != pw || v.south != ps || v.east != pe || v.north != pn) {
         pw = v.west; ps = v.south; pe = v.east; pn = v.north;
         coastline_project_rect(v.west, v.south, v.east, v.north,
                                SCREEN_CX, SCREEN_CY + 8, FIREMAP_HALF_W, FIREMAP_HALF_H);
+        borders_project_rect(v.west, v.south, v.east, v.north,
+                             SCREEN_CX, SCREEN_CY + 8, FIREMAP_HALF_W, FIREMAP_HALF_H);
     }
     if (s_fireLayer) lv_obj_invalidate(s_fireLayer);
 }
