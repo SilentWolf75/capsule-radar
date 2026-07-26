@@ -38,7 +38,6 @@ void firemap_bin_add(float lat, float lon, float frp);
 void firemap_bin_commit(int totalDetections);    // publish to the UI
 bool firemap_needs_fetch(void);
 void firemap_mark_fetched(void);
-void firemap_request_fetch(void);
 
 // --- UI ---
 int  firemap_cell_count(void);
@@ -46,7 +45,6 @@ bool firemap_cell(int idx, FireCell *out);
 int  firemap_total(void);                        // detections before binning
 void firemap_set_status(const char *s);          // short line for the screen footer
 const char *firemap_status(void);
-uint32_t firemap_version(void);                  // bumps on every commit
 
 // Project a lat/lon into the map rectangle, and back again for hit-testing. The
 // horizontal scale is cosine-corrected at the view's mid-latitude so the continent is

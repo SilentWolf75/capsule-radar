@@ -94,7 +94,7 @@ public:
     bool isOk() const { return _buffer != nullptr; }
 
     size_t write(uint8_t c) override {
-        if (_writePos < _capacity) {
+        if (_buffer && _writePos < _capacity) {
             _buffer[_writePos++] = c;
             return 1;
         }

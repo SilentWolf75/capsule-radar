@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.10.34"   // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.10.36"   // shown on the web config page + Stats screen; bump on release
 // Edit pins below: replace every -1 with the value from the Waveshare factory demo
 // (see docs/HARDWARE.md and docs/SETUP.md). Do NOT guess them.
 
@@ -54,6 +54,9 @@ static const float RANGE_STEPS_KM[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 
 #define ADSB_USER_AGENT     "CapsuleRadar/1.0 (ESP32-S3 hobby; +https://github.com/socquique/capsule-radar)"
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
 #define ADSB_MAX_AIRCRAFT   120             // hard cap parsed per poll (protect RAM in busy areas)
+// When the primary feed answers cleanly but with zero aircraft, re-probe the fallback
+// only every Nth poll. An empty sky is normal and can last hours; see AdsbClient::poll.
+#define ADSB_EMPTY_RECHECK_POLLS 30         // 30 x POLL_INTERVAL_MS = ~1 min while empty
 
 // ---------- Self-update (GitHub Pages, published by the web-flasher workflow) ----------
 // The workflow stamps manifest.json with FW_VERSION and publishes firmware.bin beside

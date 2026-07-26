@@ -508,8 +508,11 @@ static WebServer g_web(80);
 
 static void handleRoot() {
     const int th = radar::theme();
-    const float ranges[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 50.0f, 100.0f, 150.0f, 250.0f};
-    const int nRanges = (int)(sizeof(ranges) / sizeof(ranges[0]));
+    // Mirror RANGE_STEPS_KM exactly. Offering ranges the device table lacks looked fine
+    // until you touched the on-device range button: ui.cpp snaps to the nearest step, so
+    // a web-set 250 km collapsed to 100 and could not be restored without the web page.
+    const float *ranges = RANGE_STEPS_KM;
+    const int nRanges = (int)(sizeof(RANGE_STEPS_KM) / sizeof(RANGE_STEPS_KM[0]));
     const float curRange = g_settings.rangeKm;
     const float ufac  = (g_units == 0) ? 0.539957f : (g_units == 2 ? 0.621371f : 1.0f);
     const char *uname = (g_units == 0) ? "nm" : (g_units == 2 ? "mi" : "km");
@@ -528,8 +531,8 @@ static void handleRoot() {
     };
 
     bool curListed = false;
-    for (float r : ranges) {
-        if (fabsf(r - curRange) < 0.1f) { curListed = true; break; }
+    for (int i = 0; i < nRanges; ++i) {
+        if (fabsf(ranges[i] - curRange) < 0.1f) { curListed = true; break; }
     }
 
     String ropts;
@@ -620,7 +623,9 @@ static void handleRoot() {
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_trailLen ? " selected" : "", tlnames[i]);
         tlopts += o;
     }
-    const int mxvals[] = {10, 15, 20, 30, 40, 60};   // max aircraft on the scope (<= feed cap)
+    // Max aircraft on the scope. The top option must reach ADSB_MAX_AIRCRAFT, or the
+    // feed parses contacts the scope can never draw.
+    const int mxvals[] = {10, 15, 20, 30, 40, 60, 80, 100, 120};
     String mxopts;
     for (int mv : mxvals) {
         char o[64];
@@ -1713,6 +1718,21 @@ void setup() {
         },
         handleSoundUpload);
     g_web.on("/sounddel", HTTP_POST, handleSoundDelete);
+    // Health snapshot. Exists because the interesting numbers (contiguous internal heap,
+    // PSRAM headroom) previously only reached serial, which needs a cable attached.
+    g_web.on("/diag", []() {
+        char j[288];
+        snprintf(j, sizeof(j),
+                 "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
+                 "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
+                 "\"feed_cap\":%d,\"fires\":%d}",
+                 FW_VERSION, (unsigned long)(millis() / 1000),
+                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
+                 ADSB_MAX_AIRCRAFT, wildfire_count());
+        g_web.send(200, "application/json", j);
+    });
     g_web.on("/fwupd", handleFwUpd);
     g_web.on("/shot.bmp", handleShot);
     g_web.on("/view", handleView);

@@ -53,22 +53,47 @@ void AdsbClient::begin(double homeLat, double homeLon, float rangeKm) {
 
 bool AdsbClient::poll(std::vector<Aircraft>& out) {
     if (WiFi.status() != WL_CONNECTED) return false;
+    // Counts consecutive polls where the primary answered normally but with no aircraft.
+    // Only ever touched from adsb_task, so a plain static is fine.
+    static uint32_t s_emptyStreak = 0;
+
     std::vector<Aircraft> primaryList;
     bool pOk = fetchFrom(ADSB_PRIMARY_HOST, primaryList);
-    
-    // If primary returned aircraft, use them. If primary failed or returned 0, query fallback feed.
+
     if (pOk && !primaryList.empty()) {
+        s_emptyStreak = 0;
         out.swap(primaryList);
         return true;
     }
-    
-    std::vector<Aircraft> fallbackList;
-    bool fOk = fetchFrom(ADSB_FALLBACK_HOST, fallbackList);
-    if (fOk && !fallbackList.empty()) {
-        out.swap(fallbackList);
-        return true;
+
+    // Decide whether to spend a second HTTPS round-trip on the fallback feed.
+    //
+    // A primary *error* always earns one. A primary that answered cleanly with zero
+    // aircraft usually means the sky really is empty -- and at POLL_INTERVAL_MS that
+    // state can hold all night, so probing every poll would sustain double the request
+    // rate against two free non-commercial APIs. Probe on the first empty (to catch a
+    // feed that has gone silently quiet), then back off.
+    //
+    // The streak resets whenever the fallback *does* return aircraft, which collapses
+    // the backoff to every-poll for exactly the case that justifies it: a primary that
+    // is broken while the fallback still has traffic.
+    bool tryFallback = true;
+    if (pOk) {
+        tryFallback = (s_emptyStreak % ADSB_EMPTY_RECHECK_POLLS) == 0;
+        ++s_emptyStreak;
     }
-    
+
+    std::vector<Aircraft> fallbackList;
+    bool fOk = false;
+    if (tryFallback) {
+        fOk = fetchFrom(ADSB_FALLBACK_HOST, fallbackList);
+        if (fOk && !fallbackList.empty()) {
+            s_emptyStreak = 0;
+            out.swap(fallbackList);
+            return true;
+        }
+    }
+
     if (pOk) { out.swap(primaryList); return true; }
     if (fOk) { out.swap(fallbackList); return true; }
     return false;

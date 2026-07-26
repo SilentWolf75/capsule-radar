@@ -14,7 +14,6 @@ static std::mutex s_m;
 static FireCell s_cells[FIREMAP_MAX_CELLS];
 static int      s_count = 0;
 static int      s_total = 0;
-static uint32_t s_version = 0;
 
 // Accumulator, written only by the network task between reset() and commit().
 struct Bin { int32_t key; float lat, lon, frp; uint16_t count; };
@@ -56,13 +55,11 @@ void firemap_set_view(const FireView *v) {
                 v->south > d.south + 0.5 || v->north < d.north - 0.5);
     s_needFetch = true;
     s_count = 0;                       // old bins belong to the old view
-    s_version++;
 }
 
 bool firemap_is_zoomed(void)   { std::lock_guard<std::mutex> g(s_m); return s_zoomed; }
 bool firemap_needs_fetch(void) { std::lock_guard<std::mutex> g(s_m); return s_needFetch; }
 void firemap_mark_fetched(void){ std::lock_guard<std::mutex> g(s_m); s_needFetch = false; }
-void firemap_request_fetch(void){ std::lock_guard<std::mutex> g(s_m); s_needFetch = true; }
 
 // --- binning ---------------------------------------------------------------------
 void firemap_bin_reset(void) { s_binCount = 0; }
@@ -104,7 +101,6 @@ void firemap_bin_commit(int totalDetections) {
         s_cells[i].count = s_bins[i].count;
     }
     s_total = totalDetections;
-    s_version++;
 }
 
 void firemap_set_status(const char *s) {
@@ -115,7 +111,6 @@ const char *firemap_status(void) { return s_status; }
 
 int firemap_cell_count(void) { std::lock_guard<std::mutex> g(s_m); return s_count; }
 int firemap_total(void)      { std::lock_guard<std::mutex> g(s_m); return s_total; }
-uint32_t firemap_version(void){ std::lock_guard<std::mutex> g(s_m); return s_version; }
 
 bool firemap_cell(int idx, FireCell *out) {
     std::lock_guard<std::mutex> g(s_m);
