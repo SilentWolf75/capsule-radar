@@ -100,6 +100,7 @@ static volatile bool         g_firesDirty = false;
 static volatile bool         g_mapDirty = false;
 static bool                  g_mapBg = false;                        // map-tile background on/off (web/NVS)
 static int                   g_mapStyle = 0;                         // 0 = dark, 1 = light (web/NVS)
+static int                   g_mapOpa = 85;                          // basemap visibility / opacity % 0..100 (web/NVS)
 static bool                  g_time24 = false;                       // false = 12-hour clock (web/NVS)
 static bool                  g_typeIcons = true;                     // per-type aircraft silhouettes (web/NVS)
 static int                   g_trafficMode = 0;                      // 0 = aircraft, 1 = marine (web/NVS)
@@ -365,6 +366,7 @@ static void loadSettings() {
     g_firmsKey         = p.getString("firmskey", "");
     g_mapBg            = p.getBool("mapbg", false);
     g_mapStyle         = p.getInt("mapstyle", 0);
+    g_mapOpa           = p.getInt("mapopa", 85);
     g_trafficMode      = p.getInt("traffic", 0);
     g_aisKey           = p.getString("aiskey", "");
     g_time24           = p.getBool("time24", false);
@@ -374,6 +376,7 @@ static void loadSettings() {
     ui_set_time_24h(g_time24);
     wildfire_set_key(g_firmsKey.c_str());
     map_client_set_style(g_mapStyle);
+    map_client_set_opacity(g_mapOpa);
     map_client_enable(g_mapBg);
     ais_set_key(g_aisKey.c_str());
     // fonts are baked into the widgets at creation time, so the large-text flag must be
@@ -764,6 +767,8 @@ static void handleRoot() {
         "<label>Units</label><select onchange='u(this.value)'>%s</select>"
         "<label><input type=checkbox class=ck %s onchange='mb(this.checked)'>Map background</label>"
         "<label>Map style</label><select onchange='ms(this.value)'>%s</select>"
+        "<label>Map visibility (<span id=mop-val>%d%%</span>)</label>"
+        "<input type=range min=0 max=100 value='%d' oninput='mop(this.value,0)' onchange='mop(this.value,1)'>"
         "<div style='font-size:12px;opacity:.6;margin-top:4px'>Basemap tiles are redrawn "
         "after a zoom or a move, a few seconds behind the scope.</div></div>"
         "<div class=card><div class=t>Sound</div>"
@@ -906,6 +911,7 @@ static void handleRoot() {
         "function ak(v){fetch('/ais?key='+encodeURIComponent(v)+'&save=1')}"
         "function mb(c){fetch('/map?v='+(c?1:0)+'&save=1')}"
         "function ms(v){fetch('/map?style='+v+'&save=1')}"
+        "function mop(v,s){document.getElementById('mop-val').innerText=v+'%%';fetch('/mapopa?v='+v+(s?'&save=1':''))}"
         "function fr(c){fetch('/fires?v='+(c?1:0)+'&save=1')}"
         "function fk(v){fetch('/fires?key='+encodeURIComponent(v)+'&save=1')}"
         "function qm(v){fetch('/quiet?mode='+v+'&save=1')}"
@@ -929,7 +935,7 @@ static void handleRoot() {
         // order must track the HTML above: trails, max aircraft, large text, rotation,
         // units, map, sound, traffic, wildfires, quiet hours
         tlopts.c_str(), mxopts.c_str(), g_bigText ? "checked" : "", g_rotation, uopts.c_str(),
-        g_mapBg ? "checked" : "", msopts.c_str(),
+        g_mapBg ? "checked" : "", msopts.c_str(), g_mapOpa, g_mapOpa,
         g_volume, g_muted ? "checked" : "", aopts.c_str(),
         npopts.c_str(), epopts.c_str(), popts.c_str(),
         sndStatus,
@@ -1246,7 +1252,22 @@ static void handleMap() {   // map-tile background: on/off + style
         p.begin("capsuleradar", false);
         p.putBool("mapbg", g_mapBg);
         p.putInt("mapstyle", g_mapStyle);
+        p.putInt("mapopa", g_mapOpa);
         p.end();
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
+static void handleMapOpa() {
+    if (g_web.hasArg("v")) {
+        g_mapOpa = constrain((int)g_web.arg("v").toInt(), 0, 100);
+        map_client_set_opacity(g_mapOpa);
+        if (g_web.hasArg("save")) {
+            Preferences p;
+            p.begin("capsuleradar", false);
+            p.putInt("mapopa", g_mapOpa);
+            p.end();
+        }
     }
     g_web.send(200, "text/plain", "ok");
 }
@@ -1677,6 +1698,7 @@ void setup() {
     g_web.on("/quiet", handleQuiet);
     g_web.on("/fires", handleFires);
     g_web.on("/map", handleMap);
+    g_web.on("/mapopa", handleMapOpa);
     g_web.on("/ais", handleAis);
     g_web.on("/sound", HTTP_POST,
         []() {

@@ -42,6 +42,7 @@ static int      s_zoom = 0;
 static int      s_tx0 = 0, s_ty0 = 0, s_nx = 0, s_ny = 0;
 static int      s_tileIdx = 0;
 static int      s_failed = 0;
+static int      s_composeRow = 0;
 
 // geometry of the last committed (or attempted) build, to avoid rebuilding needlessly
 static double   s_haveLat = 1e9, s_haveLon = 1e9;
@@ -85,6 +86,20 @@ void map_client_set_style(int style) {
     free_mosaic();
 }
 int map_client_style(void) { return s_style; }
+
+static int s_opacity = 85;
+
+void map_client_set_opacity(int percent) {
+    if (percent < 0)   percent = 0;
+    if (percent > 100) percent = 100;
+    if (percent == s_opacity) return;
+    s_opacity = percent;
+    if (s_mosaic && s_state == MAP_IDLE) {
+        s_state = MAP_COMPOSE;
+        s_composeRow = 0;
+    }
+}
+int map_client_opacity(void) { return s_opacity; }
 
 // --- Web Mercator helpers (world pixel space at the active zoom) ---------------
 static inline double world_size(int z) { return (double)MAP_TILE_PX * (double)(1 << z); }
@@ -222,8 +237,6 @@ static bool fetch_one_tile(int idx) {
 // switched on, so the loop must hand the CPU back regularly.
 #define MAP_COMPOSE_ROWS 24        // ~11k pixels per call; comfortably inside the 5 s WDT
 
-static int s_composeRow = 0;
-
 static void compose_band(int y0, int rows) {
     uint16_t *dst = map_bg_back_buffer();
     if (!dst || !s_mosaic) return;
@@ -265,10 +278,13 @@ static void compose_band(int y0, int rows) {
             int my = (int)(wy - originY);
             if (mx < 0 || mx >= s_mosaicW || my < 0 || my >= s_mosaicH) { row[px] = 0; continue; }
 
-            // Scale the basemap brightness (87.5%) so roads and terrain read crisply on the AMOLED screen.
+            // Scale the basemap brightness dynamically using s_opacity (0..100%).
             const uint16_t c = s_mosaic[(size_t)my * s_mosaicW + mx];
-            const uint16_t r5 = (c >> 11) & 0x1F, g6 = (c >> 5) & 0x3F, b5 = c & 0x1F;
-            row[px] = (uint16_t)((((r5 * 7) >> 3) << 11) | (((g6 * 7) >> 3) << 5) | ((b5 * 7) >> 3));
+            const uint32_t scale = (uint32_t)s_opacity;
+            const uint32_t r5 = (((uint32_t)((c >> 11) & 0x1F)) * scale) / 100;
+            const uint32_t g6 = (((uint32_t)((c >> 5) & 0x3F)) * scale) / 100;
+            const uint32_t b5 = (((uint32_t)(c & 0x1F)) * scale) / 100;
+            row[px] = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
         }
     }
 }
