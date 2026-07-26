@@ -123,6 +123,28 @@ on a zoomed-in scope. Labels are drawn for every airport when 14 or fewer are on
 and for large ones only beyond that, so a zoomed-in view names the local field without
 turning a wide view into a wall of text.
 
+## Self-update
+The device updates itself over WiFi from the project's own GitHub Pages build
+(`updater.*`). The web-flasher workflow already stamps `manifest.json` with the version
+it compiled and publishes `firmware.bin` beside it, so nothing extra needs hosting: the
+device polls the manifest, compares versions, and streams the image into the spare OTA
+slot. The settings page shows the running version, the status, and an Install button
+that appears only when the server is genuinely ahead.
+
+Three details matter:
+- **Automatic installing is off by default.** Automatic *checking* is on. The asymmetry
+  is deliberate: a watchdog-crashing build reached that exact Pages site during
+  development, and a fleet set to auto-install would have rebooted itself into a loop
+  with no cable in reach.
+- **Safety is structural, not careful coding.** `Update` writes to whichever of
+  `ota_0`/`ota_1` is not running and only flips `otadata` once the image verifies, so an
+  interrupted download or a power cut leaves the current firmware bootable.
+- **The image is streamed in 1 KB chunks.** At >3 MB it must never be buffered whole,
+  and the transfer aborts if the server stalls for 20 s.
+
+Versions compare as integers (`1.8.4` -> `10804`), and anything unparseable sorts
+lowest, so a malformed manifest can never be mistaken for an upgrade.
+
 ## Map basemap: why compose() is banded
 Turning the basemap on used to put the device into a reboot loop within ~30 seconds.
 `compose()` resamples every one of 466x466 scope pixels through an inverse
