@@ -17,7 +17,12 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Queue competing deploys rather than killing the one already running. Two runs have
+  # been cancelled here in practice, and now that pushes trigger builds automatically,
+  # any two commits landing close together race for this group. Cancelling mid-deploy
+  # can leave Pages serving the previous firmware while the repo says otherwise -- the
+  # kind of mismatch nobody notices until a device fails to self-update.
+  cancel-in-progress: false
 
 jobs:
   build:
