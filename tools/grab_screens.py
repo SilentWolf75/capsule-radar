@@ -27,6 +27,7 @@ VIEWS = [
     (3, 2,    "forecast", "3-day forecast"),
     (4, None, "tracked",  "Tracked flight"),
     (5, None, "clock",    "Clock"),
+    (6, None, "firemap",  "Continental fire map"),
 ]
 
 # The detail card needs a contact selected and then a pause: tapping one kicks off four

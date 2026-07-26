@@ -36,6 +36,11 @@ Captured from the device itself — these are the real framebuffer, not photogra
 | <img src="docs/img/screens/forecast.png" width="240"> | <img src="docs/img/screens/tracked.png" width="240"> | <img src="docs/img/screens/clock.png" width="240"> |
 | Three days with vector weather icons | Follow one aircraft: route progress and ETA | Watch face with a seconds arc and current conditions |
 
+| Fire map |
+|:---:|
+| <img src="docs/img/screens/firemap.png" width="240"> |
+| Active fires across North America, sized and coloured by radiative power — tap a cluster to zoom in and switch to the higher-resolution VIIRS feed |
+
 <p align="center">
   <img src="docs/img/device.JPG" width="330" alt="Capsule Radar — a live flight on the device">
 </p>
@@ -60,13 +65,15 @@ A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75**
   - **Phosphor** — green-on-black radar scope: rings, animated sweep, aircraft glyphs rotated by heading and color-coded by altitude, fading trails, emergency halo.
   - **Orb** — green gradient + grid scope: the 7 nearest aircraft as yellow orbs emitting waves, off-range traffic as edge arrows pointing its way, orange target rings.
   - **Amber CRT** and **Military** — the same scope retinted (warm amber / night-vision green).
-- **Touch** (CST9217): tap an aircraft → detail card (callsign, type, altitude, vertical speed, ground speed, distance, heading, squawk, **airline logo/name**, and **origin → destination** looked up from adsbdb, cached in NVS). **Double-tap** to cycle zoom range, or **pinch with two fingers** to zoom continuously. Swipe between **Radar / List / Stats / Weather / Tracked / Clock** (circular layouts).
+- **Touch** (CST9217): tap an aircraft → detail card (callsign, type, altitude, vertical speed, ground speed, distance, heading, squawk, **airline name**, and **origin → destination** looked up from adsbdb, cached in NVS). **Double-tap** to cycle zoom range, or **pinch with two fingers** to zoom continuously. Swipe between **Radar / List / Stats / Weather / Tracked / Clock / Fires** (circular layouts).
 - **Tracked flight**: press **TRACK** on any aircraft's card to follow it — the Tracked view shows its route, a **progress bar** along the great circle, distance remaining and **ETA** from its ground speed. A tracked contact is pinned, so the on-screen aircraft cap never drops it as it flies away.
-- **Map background** (optional): dark or light [CARTO](https://carto.com/attribution/) basemap tiles under the scope, resampled through the radar's own projection so coastlines and roads line up with the range rings at every zoom. Tiles download one at a time so the live feed never stalls.
+- **Map background** (optional): dark or light [CARTO](https://carto.com/attribution/) basemap tiles under the scope, resampled through the radar's own projection so coastlines and roads line up with the range rings at every zoom. Tiles download one at a time so the live feed never stalls. A **visibility slider** (0–100%) on the config page fades the basemap live against the scope, so you can dial in exactly how much map shows through without rebuilding the tiles.
 - **Aircraft icons by type**: the ICAO type code picks a silhouette — swept-wing jets in three sizes, straight-wing props, helicopters (with a rotor disc), fighters and gliders — all rotated by track. Falls back to the generic glyph for unknown types, and the whole thing can be switched off.
 - **Marine traffic** (optional, needs a free [aisstream.io](https://aisstream.io) key): switch the scope from **Aircraft** to **Marine vessels** and it plots AIS contacts as cyan hulls oriented by course, with ship names; tap one for a card with MMSI, speed over ground, course, distance and bearing. The two are separate pictures rather than one overlay, and the list view follows the setting.
 - **12- or 24-hour clock**: applies to the HUD, the clock face and the weather-imagery timestamps.
 - **Wildfire markers** (optional, needs a free [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/) key): active fire detections plotted on the scope, sized and coloured by fire radiative power.
+- **Continental fire map** (same FIRMS key): a whole extra screen covering the US, Canada and Mexico, with coastlines and state borders. Detections are binned into clusters so a continent's worth of fires fits on a round 466 px panel. **Tap any area to zoom in** — the zoomed view re-queries the higher-resolution VIIRS feed instead of the MODIS overview, and you can keep tapping to re-centre. Refreshes every 15 minutes.
+- **Self-update over WiFi**: the device checks this repo's GitHub Pages build for a newer version and can install it itself — no cable, no toolchain. Check and install on demand from the config page, or leave the 6-hourly auto-check on. Writes to the inactive OTA slot, so a failed download can't brick a working install.
 - **Clock view**: a full watch face with day/date, current conditions and a three-day strip — the natural thing to leave on screen overnight.
 - **Quiet hours**: a configurable window that dims the screen, switches it off, or forces the clock view; a touch wakes it for 15 seconds.
 - **Boot splash** + **alert sounds** (ES8311 speaker): a soft cue when a new aircraft enters range, an urgent one for emergency/military. Choose between **Chime, Sonar ping, Marimba, Aircraft warning, Beep**, or **upload your own WAV from the config page** — it's converted on the device (stereo downmixed, any 8–48 kHz rate resampled to 16 kHz, volume normalised) and stored in flash, so it survives reboots without rebuilding. Volume, mute and per-cue test buttons on the web page.
