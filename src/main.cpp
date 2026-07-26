@@ -20,6 +20,7 @@
 #include "vessel.h"
 #include "ais_client.h"
 #include "wav_upload.h"
+#include "updater.h"
 #include <LittleFS.h>
 #include "weather.h"
 #include "weather_client.h"
@@ -302,6 +303,9 @@ static void adsb_task(void*) {
             }
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
+            // Self-update. Deliberately last in the task: a check is cheap but an
+            // install streams 3 MB, and the live feed should have had its turn first.
+            updater_poll();
             char wantReg[10];
             if (reg_pending(wantReg, sizeof(wantReg))) {
                 char reg[12] = "", ty[24] = "";
@@ -664,7 +668,7 @@ static void handleRoot() {
     // ~8.7 KB of markup plus ~4.5 KB of generated <option> lists; sized with headroom
     // because a truncated page renders as a broken form. It lives in PSRAM, so the
     // slack is free. The check after snprintf reports if this ever stops being enough.
-    static const size_t BUFSZ = 20480;
+    static const size_t BUFSZ = 26624;   // grows with the page; snprintf would silently truncate
     static char *buf = (char *)ps_malloc(BUFSZ);   // PSRAM: keep this big page buffer off the scarce
     if (!buf) return;                              //   internal heap (the contiguous RAM mbedTLS needs)
     const int needed = snprintf(buf, BUFSZ,
@@ -786,6 +790,20 @@ static void handleRoot() {
         "<label>Until</label><input type=time value='%02d:%02d' onchange='qe(this.value)'>"
         "<div style='font-size:12px;opacity:.6;margin-top:6px'>During the window the screen dims, "
         "switches off or shows the clock. A touch wakes it for 15 seconds.</div></div>"
+        "<div class=card><div class=t>Firmware</div>"
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 8px'>Running <b>v" FW_VERSION "</b></p>"
+        "<div id=fwst style='font-size:13px;color:#9affc8;margin-bottom:8px'>checking&hellip;</div>"
+        "<button type=button class=sec onclick='fwc()'>Check for updates</button>"
+        "<button type=button id=fwgo style='display:none' onclick='fwi()'>Install update</button>"
+        "<label><input type=checkbox class=ck %s onchange='fwa(this.checked)'>Check automatically</label>"
+        "<label><input type=checkbox class=ck %s onchange='fwai(this.checked)'>Install automatically</label>"
+        "<div style='font-size:12px;opacity:.65;margin-top:6px'>Updates come from this "
+        "project's GitHub Pages build. Installing keeps your settings and uploaded sound; "
+        "the device writes to the spare OTA slot and only switches over once the image "
+        "verifies, so a failed download leaves the current firmware running. "
+        "Automatic installing is off by default &mdash; a bad published build would "
+        "otherwise reach the device with no cable in reach. "
+        "<a href=/update style='color:#9affc8'>Upload a .bin manually</a></div></div>"
         "<div class=card><div class=t>Network</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
         "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
@@ -830,6 +848,19 @@ static void handleRoot() {
         "function al(v){fetch('/alerts?mode='+v+'&save=1')}"
         "function px(v){fetch('/alerts?prox='+v+'&save=1')}"
         "function gp(c){fetch('/gps?v='+(c?1:0)+'&save=1')}"
+        // Firmware card. One endpoint returns the whole state, so check/install/toggle
+        // and the periodic refresh all share a single render path.
+        "function fwr(j){document.getElementById('fwst').innerText=j.status;"
+        "document.getElementById('fwgo').style.display=j.avail?'block':'none';}"
+        "function fwq(q){fetch('/fwupd'+q).then(function(r){return r.json()}).then(fwr)}"
+        "function fwc(){document.getElementById('fwst').innerText='checking...';fwq('?check=1')}"
+        "function fwi(){if(!confirm('Install the update and reboot?'))return;"
+        "document.getElementById('fwst').innerText='installing - do not power off';fwq('?install=1');"
+        "setTimeout(function(){document.getElementById('fwst').innerText="
+        "'installing... the page will stop responding, then reconnect'},1500)}"
+        "function fwa(c){fwq('?auto='+(c?1:0))}"
+        "function fwai(c){fwq('?autoinst='+(c?1:0))}"
+        "setInterval(function(){fwq('')},5000);fwq('');"
         "function sp(c,v){fetch('/vol?cue='+c+'&pack='+v+'&save=1')}"
         // Only show the sound picker for a cue that is actually enabled.
         "function av(){var m=+document.getElementById('am').value;"
@@ -872,6 +903,7 @@ static void handleRoot() {
         tmopts.c_str(), g_aisKey.c_str(),
         g_showFires ? "checked" : "", g_firmsKey.c_str(),
         qopts.c_str(), g_qhStart / 60, g_qhStart % 60, g_qhEnd / 60, g_qhEnd % 60,
+        updater_auto_check() ? "checked" : "", updater_auto_install() ? "checked" : "",
         g_settings.homeLat, g_settings.homeLon, (g_tz == TZ_STR ? 0 : 1));
     // A truncated page renders as a half-broken form rather than failing loudly, so say
     // so on serial — it means BUFSZ needs raising after adding controls.
@@ -1404,6 +1436,24 @@ static void handleSoundDelete() {
     g_web.send(200, "text/plain", "removed");
 }
 
+// ---- self-update: check / install straight from the settings page ----
+static void handleFwUpd() {
+    if (g_web.hasArg("check"))   updater_request_check();
+    if (g_web.hasArg("install")) updater_request_install();
+    if (g_web.hasArg("auto"))    updater_set_auto_check(g_web.arg("auto").toInt() != 0);
+    if (g_web.hasArg("autoinst")) updater_set_auto_install(g_web.arg("autoinst").toInt() != 0);
+
+    // Always answer with the current state so the page can poll this one endpoint.
+    char latest[16], status[64];
+    bool avail = false;
+    updater_state(latest, sizeof(latest), status, sizeof(status), &avail);
+    char json[192];
+    snprintf(json, sizeof(json),
+             "{\"cur\":\"%s\",\"latest\":\"%s\",\"status\":\"%s\",\"avail\":%s}",
+             FW_VERSION, latest, status, avail ? "true" : "false");
+    g_web.send(200, "application/json", json);
+}
+
 // ---- browser OTA: upload an app .bin over WiFi and self-flash ----
 static void handleUpdatePage() {
     g_web.send(200, "text/html",
@@ -1464,6 +1514,7 @@ void setup() {
     else audio_load_sample();   // restore a previously uploaded alert sound
 
     loadSettings();
+    updater_begin();       // restore the auto-check / auto-install preferences
     route_cache_begin();   // clear stale route cache if the label format changed
 
     // --- Display + LVGL (M0) ----------------------------------------------
@@ -1604,6 +1655,7 @@ void setup() {
         },
         handleSoundUpload);
     g_web.on("/sounddel", HTTP_POST, handleSoundDelete);
+    g_web.on("/fwupd", handleFwUpd);
     g_web.on("/shot.bmp", handleShot);
     g_web.on("/view", handleView);
     g_web.on("/clockfmt", handleClockFmt);

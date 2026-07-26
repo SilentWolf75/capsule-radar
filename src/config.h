@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.4"    // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.9.0"    // shown on the web config page + Stats screen; bump on release
 // Edit pins below: replace every -1 with the value from the Waveshare factory demo
 // (see docs/HARDWARE.md and docs/SETUP.md). Do NOT guess them.
 
@@ -52,6 +52,14 @@ static const float RANGE_STEPS_KM[] = {10.0f, 20.0f, 30.0f, 50.0f, 100.0f};
 #define ADSB_USER_AGENT     "CapsuleRadar/1.0 (ESP32-S3 hobby; +https://github.com/socquique/capsule-radar)"
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
 #define ADSB_MAX_AIRCRAFT   60              // hard cap parsed per poll (protect RAM in busy areas)
+
+// ---------- Self-update (GitHub Pages, published by the web-flasher workflow) ----------
+// The workflow stamps manifest.json with FW_VERSION and publishes firmware.bin beside
+// it, so the device can compare versions and pull the image itself. Point these at your
+// own fork's Pages site if you republish.
+#define UPDATE_MANIFEST_URL  "https://silentwolf75.github.io/capsule-radar/manifest.json"
+#define UPDATE_FIRMWARE_URL  "https://silentwolf75.github.io/capsule-radar/firmware.bin"
+#define UPDATE_CHECK_INTERVAL_MS 21600000UL   // 6 h; releases are not that frequent
 
 // ---------- Debug ----------
 #define DEBUG_MEM           0               // 1 = print a [mem] heap/fps line every 5s on serial
