@@ -46,10 +46,10 @@ Every image on this page is the **real framebuffer from my device**, pulled over
 | <img src="docs/img/splash.png" width="240"> | <img src="docs/img/screens/about.png" width="240"> |
 | Painted per-pixel into a PSRAM canvas: gradient sky, stars, lit clouds, a live-looking scope and a banking airliner | The last screen: build date, board, chip, hostname, IP, uptime, feed and where the source lives |
 
-| Continental fire map |
-|:---:|
-| <img src="docs/img/screens/firemap.png" width="300"> |
-| Active fires across the US, Canada and Mexico — 715 detections binned into 72 clusters, sized and coloured by fire radiative power. **Tap any cluster to zoom in**, which re-queries the higher-resolution VIIRS feed instead of the MODIS overview. |
+| Continental fire map | Tapped to zoom |
+|:---:|:---:|
+| <img src="docs/img/screens/firemap.png" width="240"> | <img src="docs/img/screens/firemap-zoom.png" width="240"> |
+| MODIS overview: 715 active fires across the US, Canada and Mexico, binned into 72 clusters and sized by fire radiative power | Tapping the Pacific Northwest re-queries the higher-resolution **VIIRS** feed for that box — 789 detections in 32 areas, with coastlines redrawn and a WHOLE MAP button to go back |
 
 ### Themes
 

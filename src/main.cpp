@@ -1442,6 +1442,12 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
     // Track the currently selected contact (1) or clear tracking (0). TRACK is otherwise
     // a button on the detail card, which left the Tracked view uncapturable remotely.
     if (g_web.hasArg("trk")) ui_track_selected(g_web.arg("trk").toInt() != 0);
+    if (g_web.hasArg("fire")) {                 // "x,y" in screen pixels, or "reset"
+        const String a = g_web.arg("fire");
+        const int comma = a.indexOf(',');
+        if (a == "reset")   ui_fire_reset();
+        else if (comma > 0) ui_fire_tap(a.substring(0, comma).toInt(), a.substring(comma + 1).toInt());
+    }
     if (g_web.hasArg("selhex")) {          // stable across polls, unlike the index
         const bool hit = radar::selectByHex(g_web.arg("selhex").c_str());
         ui_on_data_updated();

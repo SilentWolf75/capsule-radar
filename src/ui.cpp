@@ -1121,15 +1121,12 @@ static void build_fires(void) {
     if (s_fireLayer) lv_obj_invalidate(s_fireLayer);
 }
 
-static void fire_tap_cb(lv_event_t *e) {
-    (void)e;
-    lv_indev_t *indev = lv_indev_get_act();
-    if (!indev) return;
-    lv_point_t p;
-    lv_indev_get_point(indev, &p);
-
+// Zoom the fire map around a screen point. Split out of the touch handler so the same
+// path can be driven over HTTP (/view?fire=x,y) for capture and verification, exactly
+// like sel/trk -- otherwise tap-to-zoom is only reachable with a finger on the glass.
+void ui_fire_tap(int x, int y) {
     double lat, lon;
-    firemap_unproject(p.x, p.y, SCREEN_CX, SCREEN_CY + 8,
+    firemap_unproject(x, y, SCREEN_CX, SCREEN_CY + 8,
                       FIREMAP_HALF_W, FIREMAP_HALF_H, &lat, &lon);
 
     // Clamp coordinates to valid North American bounds
@@ -1144,6 +1141,22 @@ static void fire_tap_cb(lv_event_t *e) {
     v.south = lat - 4.5; v.north = lat + 4.5;
     firemap_set_view(&v);
     build_fires();
+}
+
+// Back to the continental overview -- the WHOLE MAP button, without the finger.
+void ui_fire_reset(void) {
+    FireView v; firemap_default_view(&v);
+    firemap_set_view(&v);
+    build_fires();
+}
+
+static void fire_tap_cb(lv_event_t *e) {
+    (void)e;
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev) return;
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+    ui_fire_tap(p.x, p.y);
 }
 
 static void fire_back_cb(lv_event_t *e) {

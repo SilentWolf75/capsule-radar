@@ -5,6 +5,8 @@
 void ui_create(void);            // build the whole UI on the active screen
 void ui_on_data_updated(void);
 void ui_track_selected(bool on);   // remote equivalent of the card TRACK button (/view?trk=)
+void ui_fire_tap(int x, int y);    // remote equivalent of tapping the fire map (/view?fire=x,y)
+void ui_fire_reset(void);          // back to the continental overview (/view?fire=reset)
 void ui_show_view(int idx);      // 0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock, 6 fires
 void ui_set_status(bool wifiUp, bool feedOk, int rssi, const char *clock);  // HUD: signal bars (count=RSSI, colour: red=down, amber=stale feed, white=ok) + clock
 void ui_set_battery(int pct, bool charging, bool present);  // top HUD battery indicator
