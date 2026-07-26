@@ -67,6 +67,63 @@ struct PsramJsonAllocator : ArduinoJson::Allocator {
 };
 static PsramJsonAllocator s_jsonPsram;
 
+class PsramStream : public Stream {
+private:
+    uint8_t* _buffer;
+    size_t _capacity;
+    size_t _writePos;
+    size_t _readPos;
+
+public:
+    PsramStream(size_t capacity) {
+        _capacity = capacity;
+        _buffer = (uint8_t*)heap_caps_malloc(capacity, MALLOC_CAP_SPIRAM);
+        _writePos = 0;
+        _readPos = 0;
+    }
+
+    ~PsramStream() {
+        if (_buffer) heap_caps_free(_buffer);
+    }
+
+    bool isOk() const { return _buffer != nullptr; }
+
+    size_t write(uint8_t c) override {
+        if (_writePos < _capacity) {
+            _buffer[_writePos++] = c;
+            return 1;
+        }
+        return 0;
+    }
+
+    size_t write(const uint8_t *buffer, size_t size) override {
+        if (!_buffer) return 0;
+        size_t space = _capacity - _writePos;
+        size_t toWrite = (size < space) ? size : space;
+        memcpy(_buffer + _writePos, buffer, toWrite);
+        _writePos += toWrite;
+        return toWrite;
+    }
+
+    int read() override {
+        if (_readPos < _writePos) {
+            return _buffer[_readPos++];
+        }
+        return -1;
+    }
+
+    int peek() override {
+        if (_readPos < _writePos) {
+            return _buffer[_readPos];
+        }
+        return -1;
+    }
+
+    int available() override {
+        return (int)(_writePos - _readPos);
+    }
+};
+
 static bool https_get_json(const char *url, JsonDocument &doc, int timeoutMs) {
     WiFiClientSecure client;
     client.setInsecure();
@@ -87,8 +144,18 @@ static bool https_get_json(const char *url, JsonDocument &doc, int timeoutMs) {
                       (unsigned)ESP.getFreePsram());
         http.end(); return false;
     }
-    DeserializationError err = deserializeJson(doc, http.getStream());
+
+    PsramStream psramStream(49152); // 48 KB buffer in PSRAM
+    if (!psramStream.isOk()) {
+        Serial.println("[wxradar] PSRAM stream allocation failed");
+        http.end();
+        return false;
+    }
+
+    http.writeToStream(&psramStream);
     http.end();
+
+    DeserializationError err = deserializeJson(doc, psramStream);
     return !err;
 }
 
