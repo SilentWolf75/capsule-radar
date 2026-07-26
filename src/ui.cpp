@@ -1435,8 +1435,8 @@ void ui_splash_show(void) {
     lv_obj_set_style_text_color(ver, UI_DIM, 0);
     lv_obj_align(ver, LV_ALIGN_BOTTOM_MID, 0, -22);
 
-    // Hold splash screen visible for 3.2 seconds minimum before fading
-    lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 3200, cont);
+    // Hold splash screen visible for 6.0 seconds minimum before fading
+    lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 6000, cont);
     lv_timer_set_repeat_count(t, 1);
 }
 
