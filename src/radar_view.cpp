@@ -66,7 +66,7 @@
 // masks the angular stepping, so shortening it exposed the very judder it was meant to
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
-#define SWEEP_PERIOD_MS   5000
+#define SWEEP_PERIOD_MS   6000
 #define SWEEP_FRAME_MS    20
 #define SWEEP_TRAIL_DEG   55.0f
 #define SWEEP_TRAIL_STEPS 45
@@ -816,8 +816,7 @@ void setTheme(int t) {
     show(s_pulse, !drg);
 
     // retint the persistent chrome objects for the active palette
-    if (s_rose[0]) lv_obj_set_style_text_color(s_rose[0], s_cInk, 0);
-    for (int i = 1; i < 4; ++i) if (s_rose[i]) lv_obj_set_style_text_color(s_rose[i], s_cSoft, 0);
+    for (int i = 0; i < 4; ++i) if (s_rose[i]) lv_obj_set_style_text_color(s_rose[i], s_cSoft, 0);
     if (s_centerDot) lv_obj_set_style_bg_color(s_centerDot, s_cInk, 0);
     if (s_pulse)     lv_obj_set_style_border_color(s_pulse, s_cInk, 0);
     if (s_rangeLbl)  lv_obj_set_style_text_color(s_rangeLbl, s_cRing, 0);
@@ -939,7 +938,7 @@ void init(void *lv_parent) {
     s_sweep     = make_layer(parent, sweep_draw_cb);
     s_acLayer   = make_layer(parent, ac_draw_cb);
 
-    s_rose[0] = make_label(parent, "N", &lv_font_montserrat_28, COL_INK,  LV_ALIGN_TOP_MID,    0, 12);
+    s_rose[0] = make_label(parent, "N", &lv_font_montserrat_16, COL_SOFT, LV_ALIGN_TOP_MID,    0, 12);
     s_rose[1] = make_label(parent, "S", &lv_font_montserrat_16, COL_SOFT, LV_ALIGN_BOTTOM_MID, 0, -12);
     s_rose[2] = make_label(parent, "E", &lv_font_montserrat_16, COL_SOFT, LV_ALIGN_RIGHT_MID, -12, 0);
     s_rose[3] = make_label(parent, "W", &lv_font_montserrat_16, COL_SOFT, LV_ALIGN_LEFT_MID,   12, 0);
