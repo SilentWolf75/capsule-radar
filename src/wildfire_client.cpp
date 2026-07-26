@@ -68,11 +68,16 @@ bool wildfire_fetch(double lat, double lon, float radiusKm) {
     const double dLat = radiusKm / 111.0;
     const double cosLat = cos(lat * M_PI / 180.0);
     const double dLon = dLat / (cosLat < 0.15 ? 0.15 : cosLat);
+    // Day range MUST be at least 2. FIRMS counts back in whole UTC days and the current
+    // day's granules are still being processed, so a range of 1 lands on an empty window
+    // and returns a bare CSV header - measured as zero detections across the whole of
+    // North America, every source, while a range of 2 returned tens of thousands. The
+    // feature could never have drawn a marker with 1.
     char url[224];
     snprintf(url, sizeof(url),
              "https://firms.modaps.eosdis.nasa.gov/api/area/csv/%s/VIIRS_SNPP_NRT/"
-             "%.3f,%.3f,%.3f,%.3f/1",
-             s_key, lon - dLon, lat - dLat, lon + dLon, lat + dLat);
+             "%.3f,%.3f,%.3f,%.3f/%d",
+             s_key, lon - dLon, lat - dLat, lon + dLon, lat + dLat, FIRE_DAY_RANGE);
 
     uint8_t *body = nullptr; size_t blen = 0;
     if (!net_fetch_psram(url, ADSB_USER_AGENT, &body, &blen, 49152, 3500, 8000)) {
