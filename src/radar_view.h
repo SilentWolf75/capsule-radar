@@ -87,6 +87,7 @@ void setMaxOnScreen(int n);                       // how many (nearest) aircraft
 void setTracked(const char* hex);                 // pin a contact so the on-screen cap never drops it
 const char* tracked();                            // "" when nothing is tracked
 void setMapOpacity(int percent);                 // 0..100% map background visibility
+void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax);  // sweep smoothness telemetry
 void setLargeText(bool on);                       // accessibility: bigger glyph labels. Call BEFORE init()
 
 } // namespace radar

@@ -1730,16 +1730,19 @@ void setup() {
     // Health snapshot. Exists because the interesting numbers (contiguous internal heap,
     // PSRAM headroom) previously only reached serial, which needs a cable attached.
     g_web.on("/diag", []() {
-        char j[384];
+        float sfps = 0, savg = 0, smax = 0; uint32_t sdraw = 0;
+        radar::sweepPerf(&sfps, &sdraw, &savg, &smax);
+        char j[416];
         snprintf(j, sizeof(j),
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
-                 "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\"}",
+                 "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\","
+                 "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
-                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get());
+                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax);
         g_web.send(200, "application/json", j);
     });
     g_web.on("/fwupd", handleFwUpd);

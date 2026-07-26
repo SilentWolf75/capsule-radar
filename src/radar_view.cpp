@@ -66,10 +66,19 @@
 // masks the angular stepping, so shortening it exposed the very judder it was meant to
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
-#define SWEEP_PERIOD_MS   6000
-#define SWEEP_FRAME_MS    20
+#define SWEEP_PERIOD_MS   6000   // nominal only; the sweep is now fixed-increment
+// Degrees advanced per rendered frame. Smaller = smoother but a slower revolution;
+// at ~10 fps, 3 deg gives roughly a 12 s sweep and ~11 px of travel at the rim.
+#define SWEEP_STEP_DEG    3.0f
+// Deliberately not the fastest tick the panel can manage. The angle comes from the
+// wall clock, so a frame that misses its deadline advances the beam further rather than
+// later -- uneven angular steps, which the eye reads as stutter. Draw (~6-9 ms) plus the
+// QSPI flush of the invalidated wedge (~95 KB, ~9 ms) sits right on a 20 ms budget, so
+// frames landed inconsistently at 37-50 fps. A 30 ms tick every frame comfortably makes
+// is steadier than a 20 ms tick it sometimes misses: constant step beats peak rate.
+#define SWEEP_FRAME_MS    30
 #define SWEEP_TRAIL_DEG   55.0f
-#define SWEEP_TRAIL_STEPS 45
+#define SWEEP_TRAIL_STEPS 18   // see sweep_draw_cb: cost is per-polygon, not per-pixel
 #define SWEEP_TRAIL_OPA   140
 
 // ---- aircraft / flow / orb config ----
@@ -373,14 +382,28 @@ static void grid_draw_cb(lv_event_t *e) {
 }
 
 // =============================== sweep =======================================
+// Sweep render cost, sampled so smoothness can be diagnosed from a number rather than
+// an impression. draw_cb only fires when LVGL actually repaints, so counting it gives
+// the real achieved rate -- not the rate the timer asks for.
+static uint32_t s_drawUsAcc = 0, s_drawCnt = 0, s_perfMarkMs = 0;
+static float    s_fps = 0.0f;
+static float    s_stepAcc = 0.0f, s_stepMaxCur = 0.0f, s_stepAvg = 0.0f, s_stepMax = 0.0f;
+static uint32_t s_stepCnt = 0;
+static uint32_t s_drawUsAvg = 0;
+
 static void sweep_draw_cb(lv_event_t *e) {
     if (orb()) return;
+    const uint32_t t0 = micros();
     lv_draw_ctx_t *dctx = lv_event_get_draw_ctx(e);
     const lv_point_t center = { s_cx, s_cy };
     const float R = (float)RADAR_R_OUTER_PX;
 
-    // Draw continuous filled pie-slice triangles for a 100% smooth phosphor sector (no discrete lines)
-    const int steps = 45;
+    // Filled pie-slice triangles tiling the trail. The bands do not overlap, so the
+    // painted area is the same whatever the count -- the cost is per-lv_draw_polygon
+    // setup. 45 of them took 8-17 ms against a 20 ms budget, and because the angle is
+    // clock-driven a missed deadline makes the beam jump rather than slow, which is what
+    // reads as choppy. Fewer, wider bands buy headroom so every frame lands on time.
+    const int steps = SWEEP_TRAIL_STEPS;
     const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
     lv_draw_rect_dsc_t polyDsc;
     lv_draw_rect_dsc_init(&polyDsc);
@@ -411,6 +434,19 @@ static void sweep_draw_cb(lv_event_t *e) {
     le.round_end = 1;
     lv_point_t lead = rim_point(s_sweepDeg, R);
     lv_draw_line(dctx, &le, &center, &lead);
+
+    s_drawUsAcc += micros() - t0;
+    if (++s_drawCnt >= 30) {
+        const uint32_t now = millis();
+        if (s_perfMarkMs) {
+            const uint32_t el = now - s_perfMarkMs;
+            if (el) s_fps = (float)s_drawCnt * 1000.0f / (float)el;
+            s_drawUsAvg = s_drawUsAcc / s_drawCnt;
+        }
+        s_perfMarkMs = now;
+        s_drawCnt = 0;
+        s_drawUsAcc = 0;
+    }
 }
 
 static void wedge_bbox(float deg, lv_area_t *out) {
@@ -489,8 +525,32 @@ static void sweep_timer_cb(lv_timer_t *t) {
     }
     if (!s_sweepEnabled) return;          // sweep disabled: glyph interpolation above still runs
     s_prevSweepDeg = s_sweepDeg;
-    const uint32_t nowMs = millis();
-    s_sweepDeg = fmodf((float)(nowMs % SWEEP_PERIOD_MS) * (360.0f / (float)SWEEP_PERIOD_MS), 360.0f);
+    // Advance a fixed amount per rendered frame rather than reading the angle off the
+    // wall clock. Clock-driven looks correct on paper -- the revolution is exactly
+    // SWEEP_PERIOD_MS -- but this panel renders a frame in ~90-110 ms against a 30 ms
+    // tick, so a late frame teleported the beam: measured steps averaged 6.5 deg with
+    // spikes to 16, a 2.5x jitter ratio. That unevenness is what reads as choppy.
+    // Fixed-increment trades exact period for constant motion, which is the thing the
+    // eye actually judges. Revolution time now floats with the achieved frame rate.
+    s_sweepDeg += SWEEP_STEP_DEG;
+    if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
+
+    // How far the beam actually moved this frame. This -- not framerate -- is what the
+    // eye judges: a constant step looks smooth, a varying one looks like stutter even at
+    // a high average rate. step_max/step_avg is the stutter ratio; 1.0 is perfect.
+    {
+        float d = s_sweepDeg - s_prevSweepDeg;
+        if (d < 0) d += 360.0f;
+        if (d > 0.0f && d < 90.0f) {          // ignore the wrap and the first frame
+            s_stepAcc += d;
+            if (d > s_stepMaxCur) s_stepMaxCur = d;
+            if (++s_stepCnt >= 40) {
+                s_stepAvg = s_stepAcc / (float)s_stepCnt;
+                s_stepMax = s_stepMaxCur;
+                s_stepAcc = 0.0f; s_stepCnt = 0; s_stepMaxCur = 0.0f;
+            }
+        }
+    }
     if (!s_sweep) return;
     lv_area_t a, b, area;
     wedge_bbox(s_prevSweepDeg, &a);
@@ -1268,6 +1328,13 @@ bool positionByHex(const char *hex, double *lat, double *lon) {
 
 void setTracked(const char *hex) { s_trackHex = (hex && hex[0]) ? hex : ""; }
 const char *tracked() { return s_trackHex.c_str(); }
+
+void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax) {
+    if (fps)     *fps = s_fps;
+    if (drawUs)  *drawUs = s_drawUsAvg;
+    if (stepAvg) *stepAvg = s_stepAvg;
+    if (stepMax) *stepMax = s_stepMax;
+}
 
 void setMapOpacity(int percent) {
     if (percent < 0)   percent = 0;

@@ -23,7 +23,10 @@ static Arduino_DataBus *s_bus = nullptr;
 static Arduino_CO5300  *s_gfx = nullptr;
 
 // --- LVGL plumbing -----------------------------------------------------------
-#define LVGL_BUF_LINES 40    // partial draw-buffer height (lines); kept in fast internal RAM
+// Partial draw-buffer height. 24 lines = 466*24*2 = ~22 KB of internal RAM, deliberately
+// smaller than the 40 lines (~37 KB) this used to take, so the buffer can live in fast
+// internal SRAM again without costing the contiguous block TLS needs.
+#define LVGL_BUF_LINES 24
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t      s_disp_drv;
 static lv_indev_drv_t     s_indev_drv;
@@ -271,6 +274,8 @@ bool begin() {
     // Draw scratch in INTERNAL DMA RAM: rendering anti-aliased graphics into PSRAM is
     // slow (that, not QSPI bandwidth, was the bottleneck). Keep the active buffer in fast
     // internal SRAM; single partial buffer to stay within the internal-RAM budget.
+    // PSRAM. Putting this in internal RAM was tried and measured: no change to frame
+    // time, so it is not worth the internal budget that TLS and the photo decode need.
     const size_t buf_px = (size_t)SCREEN_W * LVGL_BUF_LINES;
     s_buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
     s_buf2 = nullptr;
@@ -283,6 +288,10 @@ bool begin() {
     // Rotation buffers live in PSRAM so the internal contiguous block needed by TLS remains
     // available. The full logical framebuffer makes inverse sampling at arbitrary angles
     // possible without holes; the smaller scratch holds transposed blocks or output batches.
+    // Stays in PSRAM. Moving this transpose target to internal DMA RAM was tried and
+    // measured: no frame-time gain at all, and it drove the largest contiguous internal
+    // block from ~35 KB down to 7 KB, below what a TLS handshake and the photo fetch
+    // need. The rotation transpose is simply not the bottleneck.
     s_rotBuf = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
     s_frameBuf = (lv_color_t *)heap_caps_calloc((size_t)SCREEN_W * SCREEN_H,
                                                 sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
