@@ -24,7 +24,7 @@ Captured from the device itself — these are the real framebuffer, not photogra
 | Radar | Detail card | Contacts |
 |:---:|:---:|:---:|
 | <img src="docs/img/screens/radar.png" width="240"> | <img src="docs/img/screens/detail.png" width="240"> | <img src="docs/img/screens/list.png" width="240"> |
-| Aircraft drawn by type, altitude-coloured, with airports labelled by ICAO/IATA ident | Tap a contact: callsign, registration, type, route, airline and a photo | Nearest-first contact list |
+| Aircraft drawn by type, altitude-coloured, with airports labelled by ICAO/IATA ident | Tap a contact for callsign, type, altitude, speed, heading, squawk — plus the airline and route looked up automatically | Nearest-first contact list |
 
 | Stats | Precipitation | Satellite |
 |:---:|:---:|:---:|
