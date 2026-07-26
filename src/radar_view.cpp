@@ -67,9 +67,9 @@
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
 #define SWEEP_PERIOD_MS   2800
-#define SWEEP_FRAME_MS    25
+#define SWEEP_FRAME_MS    16
 #define SWEEP_TRAIL_DEG   55.0f
-#define SWEEP_TRAIL_STEPS 30
+#define SWEEP_TRAIL_STEPS 24
 #define SWEEP_TRAIL_OPA   140
 
 // ---- aircraft / flow / orb config ----
@@ -379,7 +379,7 @@ static void sweep_draw_cb(lv_event_t *e) {
     const float R = (float)RADAR_R_OUTER_PX;
 
     // Draw continuous filled pie-slice triangles for a 100% smooth phosphor sector (no discrete lines)
-    const int steps = 60;
+    const int steps = 24;
     const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
     lv_draw_rect_dsc_t polyDsc;
     lv_draw_rect_dsc_init(&polyDsc);
@@ -488,12 +488,8 @@ static void sweep_timer_cb(lv_timer_t *t) {
     }
     if (!s_sweepEnabled) return;          // sweep disabled: glyph interpolation above still runs
     s_prevSweepDeg = s_sweepDeg;
-    // Fixed step per callback. Deriving the angle from the clock instead is "correct"
-    // (constant angular velocity regardless of frame rate) but looked worse here: with
-    // variable frame times it produces variable step sizes, and uneven steps read as
-    // more judder than uniform small ones. Reverted deliberately — see docs/FEATURES.md.
-    s_sweepDeg += 360.0f * (float)SWEEP_FRAME_MS / (float)SWEEP_PERIOD_MS;
-    if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
+    const uint32_t nowMs = millis();
+    s_sweepDeg = fmodf((float)(nowMs % SWEEP_PERIOD_MS) * (360.0f / (float)SWEEP_PERIOD_MS), 360.0f);
     if (!s_sweep) return;
     lv_area_t a, b, area;
     wedge_bbox(s_prevSweepDeg, &a);
