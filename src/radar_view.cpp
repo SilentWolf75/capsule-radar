@@ -378,25 +378,34 @@ static void sweep_draw_cb(lv_event_t *e) {
     const lv_point_t center = { s_cx, s_cy };
     const float R = (float)RADAR_R_OUTER_PX;
 
-    lv_draw_line_dsc_t ld;
-    lv_draw_line_dsc_init(&ld);
-    ld.color = s_cRing;
-    ld.width = 5;
-    ld.round_start = 1;
-    ld.round_end = 1;
-    for (int i = SWEEP_TRAIL_STEPS; i >= 1; --i) {
-        const float frac = 1.0f - (float)i / (float)SWEEP_TRAIL_STEPS;
-        const float ang  = s_sweepDeg - (float)i * (SWEEP_TRAIL_DEG / (float)SWEEP_TRAIL_STEPS);
-        ld.opa = (lv_opa_t)(frac * frac * (float)SWEEP_TRAIL_OPA);
-        if (ld.opa < 2) continue;
-        lv_point_t p2 = rim_point(ang, R);
-        lv_draw_line(dctx, &ld, &center, &p2);
+    // Draw continuous filled pie-slice triangles for a 100% smooth phosphor sector (no discrete lines)
+    const int steps = 40;
+    const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
+    lv_draw_rect_dsc_t polyDsc;
+    lv_draw_rect_dsc_init(&polyDsc);
+    polyDsc.bg_color = s_cRing;
+
+    for (int i = steps; i >= 1; --i) {
+        const float frac = 1.0f - (float)i / (float)steps;
+        const float a1 = s_sweepDeg - (float)i * stepDeg;
+        const float a2 = s_sweepDeg - (float)(i - 1) * stepDeg;
+        
+        polyDsc.bg_opa = (lv_opa_t)(frac * frac * 140.0f);
+        if (polyDsc.bg_opa < 2) continue;
+
+        lv_point_t pts[3];
+        pts[0] = center;
+        pts[1] = rim_point(a1, R);
+        pts[2] = rim_point(a2, R);
+        lv_draw_polygon(dctx, &polyDsc, pts, 3);
     }
+
+    // Crisp leading beam line
     lv_draw_line_dsc_t le;
     lv_draw_line_dsc_init(&le);
     le.color = s_cLead;
     le.width = 2;
-    le.opa = 217;
+    le.opa = 245;
     le.round_start = 1;
     le.round_end = 1;
     lv_point_t lead = rim_point(s_sweepDeg, R);
