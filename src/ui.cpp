@@ -9,6 +9,7 @@
 #include "firemap.h"
 #include "coastline.h"
 #include "vessel.h"
+#include "ais_client.h"
 #include "wildfire.h"
 #include "weather.h"
 #include "wx_radar.h"
@@ -585,6 +586,23 @@ static void build_list(void) {
     // The list follows the scope: in marine mode it enumerates ships, not aircraft.
     if (marine) {
         const int vn = vessel_visible_count();
+        // Say why it is empty. Without this, switching to Marine inland -- or before a
+        // key is entered -- shows a blank screen indistinguishable from a broken feed.
+        if (vn == 0) {
+            lv_obj_t *e = lv_label_create(s_list);
+            lv_label_set_long_mode(e, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(e, 320);
+            lv_obj_set_style_text_align(e, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_font(e, F14(), 0);
+            lv_obj_set_style_text_color(e, UI_DIM, 0);
+            // Explicit line breaks: the list's inner width clips before the round bezel
+            // does, so auto-wrap loses the last character of a long line.
+            lv_label_set_text(e, ais_has_key()
+                                     ? "No vessels in range\n\nAIS reception is\ncrowd-sourced from coastal\nreceivers, so inland\nlocations often see nothing."
+                                     : "No aisstream.io key\n\nAdd a free key on the\nconfig page to plot\nmarine traffic.");
+            lv_obj_align(e, LV_ALIGN_CENTER, 0, 0);
+            return;
+        }
         for (int i = 0; i < vn; ++i) {
             VesselInfo vi;
             if (!vessel_visible_info(i, &vi)) continue;
