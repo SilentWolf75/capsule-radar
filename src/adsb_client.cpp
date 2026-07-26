@@ -75,9 +75,9 @@ bool AdsbClient::poll(std::vector<Aircraft>& out) {
 }
 
 bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
-    const double nm = _rangeKm * 0.539957;            // km -> nautical miles (API radius unit)
+    const double nm = ceil((double)_rangeKm * 0.539957);            // km -> nautical miles (rounded up)
     char url[160];
-    snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, _lat, _lon, nm);
+    snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, _lat, _lon, nm > 1.0 ? nm : 1.0);
 
     bool hostChanged = (_lastHost == nullptr || strcmp(_lastHost, host) != 0);
     if (hostChanged) {
