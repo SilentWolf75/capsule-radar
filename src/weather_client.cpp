@@ -105,6 +105,7 @@ bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned)ESP.getFreePsram());
         http.end();
+        client.stop();
         return false;
     }
 
@@ -112,11 +113,13 @@ bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
     if (!psramStream.isOk()) {
         Serial.println("[weather] PSRAM stream allocation failed");
         http.end();
+        client.stop();
         return false;
     }
 
     http.writeToStream(&psramStream);
     http.end();
+    client.stop();
 
     JsonDocument doc(&s_jsonPsram);
     DeserializationError err = deserializeJson(doc, psramStream);

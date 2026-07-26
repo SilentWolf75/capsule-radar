@@ -205,11 +205,11 @@ bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t t
     http.setReuse(false);
     http.setConnectTimeout(3000);   // short: runs on the feed task, don't stall the live poll
     http.setTimeout(6000);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) { client.stop(); return false; }
     http.addHeader("User-Agent", ADSB_USER_AGENT);
 
     const int code = http.GET();
-    if (code != 200) { http.end(); return false; }
+    if (code != 200) { http.end(); client.stop(); return false; }
 
     JsonDocument filter(&s_jsonPsram);
     filter["response"]["flightroute"]["origin"]["municipality"] = true;
@@ -227,6 +227,7 @@ bool route_fetch(const char *callsign, char *from, size_t fn, char *to, size_t t
     DeserializationError err = deserializeJson(doc, http.getStream(),
                                                DeserializationOption::Filter(filter));
     http.end();
+    client.stop();
     if (err) return false;
 
     JsonObjectConst fr = doc["response"]["flightroute"].as<JsonObjectConst>();
@@ -269,11 +270,11 @@ bool reg_fetch(const char *hex, char *reg, size_t rn, char *type, size_t tn) {
     http.setReuse(false);
     http.setConnectTimeout(3000);      // shares the feed task; keep it short
     http.setTimeout(6000);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) { client.stop(); return false; }
     http.addHeader("User-Agent", ADSB_USER_AGENT);
 
     const int code = http.GET();
-    if (code != 200) { http.end(); return false; }
+    if (code != 200) { http.end(); client.stop(); return false; }
 
     JsonDocument filter(&s_jsonPsram);
     filter["response"]["aircraft"]["registration"] = true;
@@ -284,6 +285,7 @@ bool reg_fetch(const char *hex, char *reg, size_t rn, char *type, size_t tn) {
     const DeserializationError err = deserializeJson(doc, http.getStream(),
                                                      DeserializationOption::Filter(filter));
     http.end();
+    client.stop();
     if (err) return false;
 
     JsonObjectConst ac = doc["response"]["aircraft"].as<JsonObjectConst>();

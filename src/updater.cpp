@@ -138,11 +138,12 @@ static void do_check(void) {
     http.setConnectTimeout(4000);
     http.setTimeout(8000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    if (!http.begin(cli, UPDATE_MANIFEST_URL)) { set_status("could not reach the update server"); return; }
+    if (!http.begin(cli, UPDATE_MANIFEST_URL)) { set_status("could not reach the update server"); cli.stop(); return; }
     http.addHeader("User-Agent", ADSB_USER_AGENT);
     const int code = http.GET();
     if (code != 200) {
         http.end();
+        cli.stop();
         char m[64]; snprintf(m, sizeof(m), "update check failed (HTTP %d)", code);
         set_status(m);
         return;
@@ -152,12 +153,14 @@ static void do_check(void) {
     if (!psramStream.isOk()) {
         Serial.println("[update] PSRAM stream allocation failed");
         http.end();
+        cli.stop();
         set_status("update check failed (memory)");
         return;
     }
 
     http.writeToStream(&psramStream);
     http.end();
+    cli.stop();
 
     JsonDocument filter(&s_jsonPsram); filter["version"] = true;
     JsonDocument doc(&s_jsonPsram);

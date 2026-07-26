@@ -132,7 +132,7 @@ static bool https_get_json(const char *url, JsonDocument &doc, int timeoutMs) {
     http.setReuse(false);
     http.setConnectTimeout(3500);
     http.setTimeout(timeoutMs);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) { client.stop(); return false; }
     http.addHeader("User-Agent", ADSB_USER_AGENT);
     const int status = http.GET();
     if (status != 200) {
@@ -142,18 +142,22 @@ static bool https_get_json(const char *url, JsonDocument &doc, int timeoutMs) {
                       status, tlsCode, tls, (unsigned)ESP.getFreeHeap(),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned)ESP.getFreePsram());
-        http.end(); return false;
+        http.end();
+        client.stop();
+        return false;
     }
 
     PsramStream psramStream(49152); // 48 KB buffer in PSRAM
     if (!psramStream.isOk()) {
         Serial.println("[wxradar] PSRAM stream allocation failed");
         http.end();
+        client.stop();
         return false;
     }
 
     http.writeToStream(&psramStream);
     http.end();
+    client.stop();
 
     DeserializationError err = deserializeJson(doc, psramStream);
     return !err;

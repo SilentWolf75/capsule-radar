@@ -41,10 +41,10 @@ static bool http_get(const char *url, uint8_t **out, size_t *outLen, size_t maxL
     http.setReuse(false);
     http.setConnectTimeout(3000);    // keep short: this runs on the feed task, a slow photo
     http.setTimeout(6000);           // server must not freeze the live aircraft poll for long
-    if (!http.begin(cli, url)) { Serial.println("[photo]   http.begin failed"); return false; }
+    if (!http.begin(cli, url)) { Serial.println("[photo]   http.begin failed"); cli.stop(); return false; }
     http.setUserAgent(PS_UA);   // planespotters rejects the default UA; set the canonical one
     const int code = http.GET();
-    if (code != 200) { Serial.printf("[photo]   HTTP %d\n", code); http.end(); return false; }
+    if (code != 200) { Serial.printf("[photo]   HTTP %d\n", code); http.end(); cli.stop(); return false; }
 
     const int len = http.getSize();                  // >0 = Content-Length; -1 = chunked/unknown
     uint8_t *buf = nullptr;
@@ -54,7 +54,7 @@ static bool http_get(const char *url, uint8_t **out, size_t *outLen, size_t maxL
         // Known length: stream the body straight into a PSRAM buffer.
         const size_t cap = ((size_t)len <= maxLen) ? (size_t)len : maxLen;
         buf = (uint8_t *)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
-        if (!buf) { http.end(); return false; }
+        if (!buf) { http.end(); cli.stop(); return false; }
         WiFiClient *stream = http.getStreamPtr();
         uint32_t last = millis();
         while (got < cap && (millis() - last) < 9000) {
@@ -87,6 +87,7 @@ static bool http_get(const char *url, uint8_t **out, size_t *outLen, size_t maxL
         }
     }
     http.end();
+    cli.stop();
     if (got == 0) { if (buf) heap_caps_free(buf); return false; }
     *out = buf; *outLen = got;
     return true;

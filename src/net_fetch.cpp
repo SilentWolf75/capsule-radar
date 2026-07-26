@@ -19,11 +19,11 @@ bool net_fetch_psram(const char *url, const char *userAgent,
     http.setReuse(false);
     http.setConnectTimeout(connectTimeoutMs);
     http.setTimeout(totalTimeoutMs);
-    if (!http.begin(cli, url)) return false;
+    if (!http.begin(cli, url)) { cli.stop(); return false; }
     if (userAgent) http.setUserAgent(userAgent);
 
     const int code = http.GET();
-    if (code != 200) { Serial.printf("[net] HTTP %d\n", code); http.end(); return false; }
+    if (code != 200) { Serial.printf("[net] HTTP %d\n", code); http.end(); cli.stop(); return false; }
 
     const int len = http.getSize();           // >0 = Content-Length; -1 = chunked/unknown
     uint8_t *buf = nullptr;
@@ -33,7 +33,7 @@ bool net_fetch_psram(const char *url, const char *userAgent,
         // Known length: stream the body straight into a PSRAM buffer.
         const size_t cap = ((size_t)len <= maxLen) ? (size_t)len : maxLen;
         buf = (uint8_t *)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
-        if (!buf) { http.end(); return false; }
+        if (!buf) { http.end(); cli.stop(); return false; }
         WiFiClient *stream = http.getStreamPtr();
         uint32_t last = millis();
         while (got < cap && (millis() - last) < (uint32_t)totalTimeoutMs) {
@@ -61,6 +61,7 @@ bool net_fetch_psram(const char *url, const char *userAgent,
         }
     }
     http.end();
+    cli.stop();
     if (got == 0) { if (buf) heap_caps_free(buf); return false; }
     *out = buf; *outLen = got;
     return true;

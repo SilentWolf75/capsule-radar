@@ -87,7 +87,9 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
                       (unsigned)ESP.getFreeHeap(),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned)ESP.getFreePsram());
-        _http.end(); return false;
+        _http.end();
+        _client.stop();
+        return false;
     }
 
     // Only keep the fields we use -> much smaller parsed document.
@@ -111,9 +113,11 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
                       host, err.c_str(), expectedBytes, (unsigned)jsonStream.bytesRead(),
                       responseStream.available(), responseStream.connected());
         _http.end();
+        _client.stop();
         return false;
     }
     _http.end();
+    _client.stop();
 
     JsonArrayConst arr = doc["ac"].as<JsonArrayConst>();
     if (arr.isNull()) arr = doc["aircraft"].as<JsonArrayConst>();

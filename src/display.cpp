@@ -272,11 +272,11 @@ bool begin() {
     // slow (that, not QSPI bandwidth, was the bottleneck). Keep the active buffer in fast
     // internal SRAM; single partial buffer to stay within the internal-RAM budget.
     const size_t buf_px = (size_t)SCREEN_W * LVGL_BUF_LINES;
-    s_buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    s_buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
     s_buf2 = nullptr;
     if (!s_buf1) {
-        Serial.println("[display] internal draw buffer failed; falling back to PSRAM");
-        s_buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+        Serial.println("[display] PSRAM draw buffer failed; falling back to internal RAM");
+        s_buf1 = (lv_color_t *)heap_caps_malloc(buf_px * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     }
     lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, buf_px);
 
