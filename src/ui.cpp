@@ -17,6 +17,7 @@
 #include "geo.h"
 #include "config.h"
 #include <lvgl.h>
+#include <WiFi.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -30,6 +31,8 @@
 #define UI_PANEL lv_color_hex(0x0C160F)
 #define UI_EMERG lv_color_hex(0xFF5A3C)
 #define UI_MIL   lv_color_hex(0xC77DFF)   // matches the scope's military brackets
+#define UI_AMBER lv_color_hex(0xFF9E0B)
+#define UI_CYAN  lv_color_hex(0x00E5FF)
 
 static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
@@ -639,16 +642,20 @@ static void build_stats(void) {
     if (ships) snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), "\nVessels    %d", ships);
     if (fires) snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), "\nFires      %d", fires);
 
-    char st[300];
+    const int rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+    const char *q = (rssi > -60) ? "EXCELLENT" : ((rssi > -75) ? "GOOD" : ((rssi != 0) ? "WEAK" : "OFFLINE"));
+
+    char st[350];
     snprintf(st, sizeof(st),
              "Aircraft   %d\n"
              "Emergency  %d\n"
-             "Nearest    %s\n"
-             "           %.1f %s\n"
+             "Nearest    %s (%.1f %s)\n"
              "Highest    %s\n"
-             "Range      %.0f %s%s",
+             "Range      %.0f %s%s\n"
+             "WiFi RSSI  %d dBm (%s)",
              n, emg, n ? nearestCall : "-", dist_val(n ? nearest : 0.0f), dist_unit(),
-             altH, dist_val(s_rangeKm), dist_unit(), extra);
+             altH, dist_val(s_rangeKm), dist_unit(), extra,
+             rssi, q);
     lv_label_set_text(s_statsLbl, st);
 }
 
@@ -961,7 +968,7 @@ static void track_btn_cb(lv_event_t *) {
 // phenomenon and the scope's range would have to be absurd to show any. Coastline comes
 // from the same embedded dataset the radar uses, so the map needs no network at all.
 static lv_obj_t *s_tileFires = nullptr, *s_fireLayer = nullptr;
-static lv_obj_t *s_fireTitle = nullptr, *s_fireInfo = nullptr, *s_fireBack = nullptr;
+static lv_obj_t *s_fireTitle = nullptr, *s_fireBadge = nullptr, *s_fireInfo = nullptr, *s_fireBack = nullptr;
 static uint32_t  s_fireSeen = 0;
 
 static void fire_draw_cb(lv_event_t *e) {
@@ -1061,7 +1068,11 @@ static void fire_draw_cb(lv_event_t *e) {
 static void build_fires(void) {
     if (!s_fireTitle) return;
     const bool zoomed = firemap_is_zoomed();
-    lv_label_set_text(s_fireTitle, zoomed ? "FIRES - VIIRS HIGH-RES" : "FIRES - MODIS OVERVIEW");
+    lv_label_set_text(s_fireTitle, "FIRES");
+    if (s_fireBadge) {
+        lv_label_set_text(s_fireBadge, zoomed ? "VIIRS HIGH-RES" : "MODIS OVERVIEW");
+        lv_obj_set_style_text_color(s_fireBadge, zoomed ? UI_AMBER : UI_CYAN, 0);
+    }
     if (zoomed) lv_obj_clear_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
     else        lv_obj_add_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
 
@@ -1928,7 +1939,20 @@ void ui_create(void) {
     // --- fires tile (continental map) ---
     lv_obj_t *fp = make_round_panel(s_tileFires);
     lv_obj_set_style_bg_color(fp, lv_color_black(), 0);
-    s_fireTitle = make_tile_title(fp, "FIRES - N AMERICA");
+    s_fireTitle = make_tile_title(fp, "FIRES");
+
+    s_fireBadge = lv_label_create(fp);
+    lv_obj_set_style_text_font(s_fireBadge, F12(), 0);
+    lv_obj_set_style_text_color(s_fireBadge, UI_CYAN, 0);
+    lv_obj_set_style_bg_color(s_fireBadge, lv_color_hex(0x0A1926), 0);
+    lv_obj_set_style_bg_opa(s_fireBadge, 200, 0);
+    lv_obj_set_style_pad_left(s_fireBadge, 8, 0);
+    lv_obj_set_style_pad_right(s_fireBadge, 8, 0);
+    lv_obj_set_style_pad_top(s_fireBadge, 2, 0);
+    lv_obj_set_style_pad_bottom(s_fireBadge, 2, 0);
+    lv_obj_set_style_radius(s_fireBadge, 10, 0);
+    lv_obj_align(s_fireBadge, LV_ALIGN_TOP_MID, 0, 48);
+    lv_label_set_text(s_fireBadge, "MODIS OVERVIEW");
 
     s_fireLayer = lv_obj_create(fp);
     lv_obj_remove_style_all(s_fireLayer);
