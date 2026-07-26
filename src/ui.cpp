@@ -1220,6 +1220,32 @@ static void clock_tick_cb(lv_timer_t *) {
     lv_label_set_text(s_clockSec, s_time24 ? "" : (ti.tm_hour < 12 ? "AM" : "PM"));
 }
 
+// ------------------------------------------------------------------- about tile
+static lv_obj_t *s_tileAbout = nullptr, *s_aboutBody = nullptr;
+
+static void build_about(void) {
+    if (!s_aboutBody) return;
+    const uint32_t up = millis() / 1000UL;
+    char ip[24] = "offline";
+    if (WiFi.status() == WL_CONNECTED) snprintf(ip, sizeof(ip), "%s", WiFi.localIP().toString().c_str());
+
+    char body[520];
+    snprintf(body, sizeof(body),
+             "#63D8FF BUILD#   %s\n"
+             "#63D8FF BOARD#   Waveshare ESP32-S3\n"
+             "         Touch-AMOLED 1.75\"\n"
+             "#63D8FF CHIP#    ESP32-S3 : 8MB PSRAM\n"
+             "         16MB flash : dual 240MHz\n"
+             "#63D8FF HOST#    skyglass.local\n"
+             "#63D8FF IP#      %s\n"
+             "#63D8FF UPTIME#  %luh %lum\n"
+             "#63D8FF FEED#    airplanes.live / adsb.lol\n"
+             "#9AFFC8 github.com/SilentWolf75/skyglass#\n"
+             "#5F7A6C MIT : fork of socquique/capsule-radar#",
+             __DATE__, ip, (unsigned long)(up / 3600UL), (unsigned long)((up / 60UL) % 60UL));
+    lv_label_set_text(s_aboutBody, body);
+}
+
 // Rebuild whichever of list/stats is currently on screen (called on poll and on swipe).
 static void refresh_active_tile(void) {
     if (!s_tv) return;
@@ -1230,6 +1256,7 @@ static void refresh_active_tile(void) {
     else if (act == s_tileClock) build_clock_weather();
     else if (act == s_tileFires) build_fires();
     else if (act == s_tileTracked) build_tracked();
+    else if (act == s_tileAbout) build_about();
 }
 
 void ui_on_data_updated(void) {
@@ -1377,12 +1404,208 @@ static void build_card(void) {
 }
 
 void ui_show_view(int idx) {
-    if (s_tv && idx >= 0 && idx <= 6) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
+    if (s_tv && idx >= 0 && idx <= 7) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
 }
 
 // ------------------------------------------------------------------- splash
+// Painted into a PSRAM canvas rather than stacked out of LVGL widgets: a gradient sky,
+// soft-edged clouds and a rotated aircraft silhouette are all per-pixel work that the
+// widget set cannot express. 466x466 RGB565 is ~434 KB, which PSRAM has to spare, and
+// it is freed the moment the splash fades out.
+static lv_color_t *s_splashBuf = nullptr;
+
+static inline void sp_blend(lv_color_t *b, int x, int y, lv_color_t c, int a) {
+    if (a <= 0 || x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
+    lv_color_t *p = &b[y * SCREEN_W + x];
+    *p = (a >= 255) ? c : lv_color_mix(c, *p, (uint8_t)a);
+}
+
+// Filled disc with a feathered edge — the building block for clouds and glows.
+static void sp_disc(lv_color_t *b, float cx, float cy, float r, lv_color_t c, int a, float feather) {
+    const int x0 = (int)(cx - r - feather), x1 = (int)(cx + r + feather);
+    const int y0 = (int)(cy - r - feather), y1 = (int)(cy + r + feather);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            const float d  = sqrtf(dx * dx + dy * dy);
+            if (d > r + feather) continue;
+            int aa = a;
+            if (d > r && feather > 0.0f) aa = (int)(a * (1.0f - (d - r) / feather));
+            sp_blend(b, x, y, c, aa);
+        }
+    }
+}
+
+static void sp_ring(lv_color_t *b, float cx, float cy, float r, float th, lv_color_t c, int a) {
+    const int x0 = (int)(cx - r - th), x1 = (int)(cx + r + th);
+    const int y0 = (int)(cy - r - th), y1 = (int)(cy + r + th);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            const float e  = fabsf(sqrtf(dx * dx + dy * dy) - r);
+            if (e > th) continue;
+            sp_blend(b, x, y, c, (int)(a * (1.0f - e / th)));
+        }
+    }
+}
+
+// Convex polygon scanline fill. The aircraft is assembled from a few of these.
+static void sp_poly(lv_color_t *b, const float *px, const float *py, int n, lv_color_t c, int a) {
+    float miny = 1e9f, maxy = -1e9f;
+    for (int i = 0; i < n; ++i) { if (py[i] < miny) miny = py[i]; if (py[i] > maxy) maxy = py[i]; }
+    int y0 = (int)floorf(miny), y1 = (int)ceilf(maxy);
+    if (y0 < 0) y0 = 0;
+    if (y1 > SCREEN_H - 1) y1 = SCREEN_H - 1;
+    for (int y = y0; y <= y1; ++y) {
+        const float fy = y + 0.5f;
+        float xs[10]; int cnt = 0;
+        for (int i = 0; i < n && cnt < 10; ++i) {
+            const int j = (i + 1) % n;
+            const float ya = py[i], yb = py[j];
+            if ((ya <= fy && yb > fy) || (yb <= fy && ya > fy))
+                xs[cnt++] = px[i] + (fy - ya) / (yb - ya) * (px[j] - px[i]);
+        }
+        if (cnt < 2) continue;
+        for (int i = 0; i < cnt - 1; ++i)
+            for (int k = i + 1; k < cnt; ++k)
+                if (xs[k] < xs[i]) { const float t = xs[i]; xs[i] = xs[k]; xs[k] = t; }
+        for (int i = 0; i + 1 < cnt; i += 2) {
+            const int xa = (int)ceilf(xs[i] - 0.5f), xb = (int)floorf(xs[i + 1] - 0.5f);
+            for (int x = xa; x <= xb; ++x) sp_blend(b, x, y, c, a);
+        }
+    }
+}
+
+// Rotate a local-space shape about (0,0), scale, translate, then fill.
+static void sp_shape(lv_color_t *b, const float *lx, const float *ly, int n,
+                     float ox, float oy, float rot, float sc, lv_color_t c, int a) {
+    float px[10], py[10];
+    const float s = sinf(rot), co = cosf(rot);
+    for (int i = 0; i < n; ++i) {
+        px[i] = ox + (lx[i] * co - ly[i] * s) * sc;
+        py[i] = oy + (lx[i] * s  + ly[i] * co) * sc;
+    }
+    sp_poly(b, px, py, n, c, a);
+}
+
+static void splash_paint(lv_color_t *b) {
+    // --- sky: vertical gradient from deep night down to a warm horizon ---
+    struct { int y; uint32_t rgb; } stop[] = {
+        {   0, 0x050A1E }, { 120, 0x0C2350 }, { 230, 0x1B4E8C },
+        { 320, 0x3E82B8 }, { 384, 0xE79A55 }, { 430, 0xF8C87C }, { 466, 0xFFDCA8 },
+    };
+    const int nstop = (int)(sizeof(stop) / sizeof(stop[0]));
+    for (int y = 0; y < SCREEN_H; ++y) {
+        int k = 0;
+        while (k < nstop - 2 && y > stop[k + 1].y) ++k;
+        const float t = (float)(y - stop[k].y) / (float)(stop[k + 1].y - stop[k].y);
+        const lv_color_t c = lv_color_mix(lv_color_hex(stop[k + 1].rgb),
+                                          lv_color_hex(stop[k].rgb),
+                                          (uint8_t)(t * 255.0f));
+        for (int x = 0; x < SCREEN_W; ++x) b[y * SCREEN_W + x] = c;
+    }
+
+    // --- stars, fading out as the sky brightens toward the horizon ---
+    uint32_t rnd = 0x5EED1234;
+    for (int i = 0; i < 90; ++i) {
+        rnd = rnd * 1664525u + 1013904223u;
+        const int sx = (int)((rnd >> 8) % SCREEN_W);
+        rnd = rnd * 1664525u + 1013904223u;
+        const int sy = (int)((rnd >> 8) % 250);
+        const int a  = 40 + (int)((rnd >> 4) % 150);
+        sp_blend(b, sx, sy, lv_color_hex(0xFFFFFF), a * (250 - sy) / 250);
+    }
+
+    // --- clouds: overlapping feathered discs, lit warm from below ---
+    const struct { float x, y, r; int a; uint32_t c; } cloud[] = {
+        {  70, 352, 30, 150, 0xFFE2C0 }, { 104, 344, 38, 160, 0xFFEBD2 }, { 140, 354, 26, 145, 0xFFDDB8 },
+        { 330, 336, 34, 150, 0xFFE6C8 }, { 366, 330, 26, 140, 0xFFF0DC }, { 300, 344, 22, 130, 0xFFDCB4 },
+        { 210, 392, 30, 120, 0xFFD9AE }, { 250, 398, 24, 110, 0xFFE4C4 }, { 172, 398, 22, 110, 0xFFD2A4 },
+    };
+    for (unsigned i = 0; i < sizeof(cloud) / sizeof(cloud[0]); ++i)
+        sp_disc(b, cloud[i].x, cloud[i].y, cloud[i].r, lv_color_hex(cloud[i].c), cloud[i].a, 16.0f);
+
+    // --- radar scope, sitting in the darker upper sky for contrast ---
+    const float scx = SCREEN_CX, scy = 196.0f;
+    const lv_color_t cyan = lv_color_hex(0x35E8FF);
+    sp_disc(b, scx, scy, 132.0f, lv_color_hex(0x03121F), 120, 10.0f);   // scope glass
+    for (int i = 1; i <= 3; ++i) sp_ring(b, scx, scy, 44.0f * i, 1.6f, cyan, 150);
+    sp_ring(b, scx, scy, 132.0f, 2.4f, cyan, 200);
+    for (int i = 0; i < 4; ++i) {                                        // crosshair
+        const float a = (float)i * (float)M_PI / 2.0f;
+        for (float d = 6; d < 132; d += 1.0f)
+            sp_blend(b, (int)(scx + cosf(a) * d), (int)(scy + sinf(a) * d), cyan, 60);
+    }
+
+    // --- sweep wedge, trailing behind the leading edge ---
+    const float lead = -0.62f, span = 1.15f;
+    for (int y = (int)(scy - 133); y <= (int)(scy + 133); ++y) {
+        for (int x = (int)(scx - 133); x <= (int)(scx + 133); ++x) {
+            const float dx = x + 0.5f - scx, dy = y + 0.5f - scy;
+            const float d = sqrtf(dx * dx + dy * dy);
+            if (d > 131.0f) continue;
+            float da = lead - atan2f(dy, dx);
+            while (da < 0) da += 2.0f * (float)M_PI;
+            while (da > 2.0f * (float)M_PI) da -= 2.0f * (float)M_PI;
+            if (da > span) continue;
+            const int a = (int)(120.0f * (1.0f - da / span) * (1.0f - d / 131.0f * 0.35f));
+            sp_blend(b, x, y, lv_color_hex(0x2BFF9E), a);
+        }
+    }
+    const float blip[][2] = { {-58, -34}, {40, -62}, {74, 30}, {-30, 66} };
+    for (unsigned i = 0; i < sizeof(blip) / sizeof(blip[0]); ++i) {
+        sp_disc(b, scx + blip[i][0], scy + blip[i][1], 6.0f, lv_color_hex(0x2BFF9E), 70, 5.0f);
+        sp_disc(b, scx + blip[i][0], scy + blip[i][1], 2.4f, lv_color_hex(0xCFFFE6), 255, 1.2f);
+    }
+
+    // --- the aircraft: airliner planform, banking across the scope ---
+    const float rot = -0.34f, sc = 1.32f, px_ = scx - 6, py_ = scy + 4;
+    const lv_color_t body = lv_color_hex(0xF2F7FF), shade = lv_color_hex(0x9FB6D4);
+    const float wingL[6] = {  8,  -6, -30, -22,  -2,   6 };
+    const float wingLy[6]= { -4, -10, -54, -56, -12,  -4 };
+    const float wingR[6] = {  8,  -6, -30, -22,  -2,   6 };
+    const float wingRy[6]= {  4,  10,  54,  56,  12,   4 };
+    sp_shape(b, wingL, wingLy, 6, px_, py_, rot, sc, shade, 250);
+    sp_shape(b, wingR, wingRy, 6, px_, py_, rot, sc, body,  250);
+    const float tailL[4] = { -36, -50, -44, -34 };
+    const float tailLy[4]= {  -3, -22, -24,  -3 };
+    const float tailR[4] = { -36, -50, -44, -34 };
+    const float tailRy[4]= {   3,  22,  24,   3 };
+    sp_shape(b, tailL, tailLy, 4, px_, py_, rot, sc, shade, 250);
+    sp_shape(b, tailR, tailRy, 4, px_, py_, rot, sc, body,  250);
+    // Slung just ahead of the swept leading edge. At this span the wing only occupies
+    // x -17..-10, so anything further forward floats free of the aircraft.
+    const float nacL[4] = { -24, -13, -13, -24 };
+    const float nacLy[4]= { -28, -29, -35, -34 };
+    const float nacR[4] = { -24, -13, -13, -24 };
+    const float nacRy[4]= {  28,  29,  35,  34 };
+    sp_shape(b, nacL, nacLy, 4, px_, py_, rot, sc, lv_color_hex(0x4E6B8C), 250);
+    sp_shape(b, nacR, nacRy, 4, px_, py_, rot, sc, lv_color_hex(0x5E7EA4), 250);
+    const float fus[8]  = {  54,  44,  10, -46, -52, -46,  10,  44 };
+    const float fusy[8] = {   0,  -6,  -9,  -7,   0,   7,   9,   6 };
+    sp_shape(b, fus, fusy, 8, px_, py_, rot, sc, body, 255);
+    const float fin[4]  = { -34, -50, -44, -30 };
+    const float finy[4] = {  -1, -12, -13,  -1 };
+    sp_shape(b, fin, finy, 4, px_, py_, rot, sc, lv_color_hex(0x6FA8DC), 250);
+
+    // --- vignette: the panel is round, so fade the unreachable corners to black ---
+    for (int y = 0; y < SCREEN_H; ++y) {
+        for (int x = 0; x < SCREEN_W; ++x) {
+            const float dx = x - SCREEN_CX, dy = y - SCREEN_CY;
+            const float d = sqrtf(dx * dx + dy * dy);
+            if (d < 196.0f) continue;
+            int a = (int)((d - 196.0f) / 37.0f * 255.0f);
+            if (a > 255) a = 255;
+            sp_blend(b, x, y, lv_color_black(), a);
+        }
+    }
+}
+
 static void splash_fade_cb(void *obj, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0); }
-static void splash_del_cb(lv_anim_t *a) { lv_obj_del((lv_obj_t *)a->var); }
+static void splash_del_cb(lv_anim_t *a) {
+    lv_obj_del((lv_obj_t *)a->var);
+    if (s_splashBuf) { heap_caps_free(s_splashBuf); s_splashBuf = nullptr; }
+}
 
 static void splash_dismiss_cb(lv_timer_t *t) {
     lv_obj_t *cont = (lv_obj_t *)t->user_data;
@@ -1406,59 +1629,51 @@ void ui_splash_show(void) {
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Tactical concentric scope rings
-    const lv_coord_t dia[4] = { 260, 200, 136, 72 };
-    const lv_opa_t   op[4]  = { 60, 100, 140, 180 };
-    for (int i = 0; i < 4; ++i) {
-        lv_obj_t *r = lv_obj_create(cont);
-        lv_obj_remove_style_all(r);
-        lv_obj_set_size(r, dia[i], dia[i]);
-        lv_obj_align(r, LV_ALIGN_CENTER, 0, -22);
-        lv_obj_set_style_radius(r, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_color(r, UI_GREEN, 0);
-        lv_obj_set_style_border_opa(r, op[i], 0);
-        lv_obj_set_style_border_width(r, 2, 0);
-        lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    // Painted artwork. If PSRAM is momentarily unavailable the splash still shows its
+    // text over black rather than failing to boot.
+    s_splashBuf = (lv_color_t *)heap_caps_malloc((size_t)SCREEN_W * SCREEN_H * sizeof(lv_color_t),
+                                                 MALLOC_CAP_SPIRAM);
+    if (s_splashBuf) {
+        splash_paint(s_splashBuf);
+        lv_obj_t *cv = lv_canvas_create(cont);
+        lv_canvas_set_buffer(cv, s_splashBuf, SCREEN_W, SCREEN_H, LV_IMG_CF_TRUE_COLOR);
+        lv_obj_center(cv);
     }
 
-    // Center phosphor beacon dot
-    lv_obj_t *dot = lv_obj_create(cont);
-    lv_obj_remove_style_all(dot);
-    lv_obj_set_size(dot, 8, 8);
-    lv_obj_align(dot, LV_ALIGN_CENTER, 0, -22);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot, UI_GREEN, 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+    // Title, with a dark plate behind it so it stays legible over the horizon glow.
+    lv_obj_t *plate = lv_obj_create(cont);
+    lv_obj_remove_style_all(plate);
+    lv_obj_set_size(plate, 306, 112);
+    lv_obj_align(plate, LV_ALIGN_CENTER, 0, 132);
+    lv_obj_set_style_radius(plate, 18, 0);
+    lv_obj_set_style_bg_color(plate, lv_color_hex(0x02070F), 0);
+    lv_obj_set_style_bg_opa(plate, 180, 0);
+    lv_obj_set_style_border_color(plate, lv_color_hex(0x35E8FF), 0);
+    lv_obj_set_style_border_opa(plate, 90, 0);
+    lv_obj_set_style_border_width(plate, 1, 0);
+    lv_obj_clear_flag(plate, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Rotating radar sweep beam
-    lv_obj_t *sweep = lv_spinner_create(cont, 1500, 60);
-    lv_obj_set_size(sweep, 260, 260);
-    lv_obj_align(sweep, LV_ALIGN_CENTER, 0, -22);
-    lv_obj_set_style_arc_opa(sweep, 0, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(sweep, UI_GREEN, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(sweep, 4, LV_PART_INDICATOR);
-
-    // Branded Title
     lv_obj_t *title = lv_label_create(cont);
     lv_label_set_text(title, "SKYGLASS");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(title, UI_GREEN, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 118);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xEAF8FF), 0);
+    lv_obj_set_style_text_letter_space(title, 4, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, 122);
 
-    // Subtitle
     lv_obj_t *sub = lv_label_create(cont);
-    lv_label_set_text(sub, "AIR TRAFFIC MONITORING");
-    lv_obj_set_style_text_font(sub, F14(), 0);
-    lv_obj_set_style_text_color(sub, UI_SOFT, 0);
-    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 150);
+    lv_label_set_text(sub, "LIVE AIRSPACE MONITOR");
+    lv_obj_set_style_text_font(sub, F12(), 0);
+    lv_obj_set_style_text_color(sub, lv_color_hex(0x63D8FF), 0);
+    lv_obj_set_style_text_letter_space(sub, 2, 0);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 152);
 
-    // Version Badge at bottom
+    // On the plate, not the bezel: at the bottom of the screen this sat on the horizon
+    // glow and was effectively invisible.
     lv_obj_t *ver = lv_label_create(cont);
     lv_label_set_text(ver, "v" FW_VERSION);
     lv_obj_set_style_text_font(ver, F12(), 0);
-    lv_obj_set_style_text_color(ver, UI_DIM, 0);
-    lv_obj_align(ver, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_style_text_color(ver, lv_color_hex(0xBFD8E8), 0);
+    lv_obj_align(ver, LV_ALIGN_CENTER, 0, 176);
 
     // Hold splash screen visible for 6.0 seconds minimum before fading
     lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 6000, cont);
@@ -1482,7 +1697,8 @@ void ui_create(void) {
     s_tileWeather = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
     s_tileTracked = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);
     s_tileClock = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_HOR);
-    s_tileFires = lv_tileview_add_tile(s_tv, 6, 0, LV_DIR_LEFT);
+    s_tileFires = lv_tileview_add_tile(s_tv, 6, 0, LV_DIR_HOR);
+    s_tileAbout = lv_tileview_add_tile(s_tv, 7, 0, LV_DIR_LEFT);
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) { refresh_active_tile(); }, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -2027,6 +2243,36 @@ void ui_create(void) {
     lv_obj_clear_flag(s_fireBack, LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_add_event_cb(s_fireBack, fire_back_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
+
+    // --- about tile (last screen: what this is, what it is running on) ---
+    lv_obj_t *ap = make_round_panel(s_tileAbout);
+    make_tile_title(ap, "ABOUT");
+
+    lv_obj_t *aName = lv_label_create(ap);
+    lv_label_set_text(aName, "SKYGLASS");
+    lv_obj_set_style_text_font(aName, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(aName, UI_INK, 0);
+    lv_obj_set_style_text_letter_space(aName, 3, 0);
+    lv_obj_align(aName, LV_ALIGN_TOP_MID, 0, 54);
+
+    lv_obj_t *aVer = lv_label_create(ap);
+    lv_label_set_text(aVer, "v" FW_VERSION);
+    lv_obj_set_style_text_font(aVer, F14(), 0);
+    lv_obj_set_style_text_color(aVer, UI_CYAN, 0);
+    lv_obj_align(aVer, LV_ALIGN_TOP_MID, 0, 90);
+
+    // Recolour mode so the field labels can be dimmer than their values in one label.
+    s_aboutBody = lv_label_create(ap);
+    lv_label_set_recolor(s_aboutBody, true);
+    lv_obj_set_width(s_aboutBody, 360);
+    lv_obj_set_style_text_font(s_aboutBody, F12(), 0);
+    lv_obj_set_style_text_color(s_aboutBody, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_aboutBody, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(s_aboutBody, 2, 0);
+    // Kept high enough that the last line clears the round bezel: at this width the
+    // usable half-chord shrinks fast below y=370.
+    lv_obj_align(s_aboutBody, LV_ALIGN_CENTER, 0, 14);
+    build_about();
     lv_obj_t *bl = lv_label_create(s_fireBack);
     lv_obj_set_style_text_font(bl, F12(), 0);
     lv_obj_set_style_text_color(bl, UI_GREEN, 0);

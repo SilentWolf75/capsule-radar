@@ -41,6 +41,11 @@ Every image on this page is the **real framebuffer from my device**, pulled over
 | <img src="docs/img/screens/wx-radar.png" width="240"> | <img src="docs/img/screens/wx-cloud.png" width="240"> | <img src="docs/img/screens/forecast.png" width="240"> |
 | RainViewer echoes with aviation-style overlays | EUMETSAT cloud-type imagery | Three days with vector weather icons |
 
+| Boot splash | About |
+|:---:|:---:|
+| <img src="docs/img/splash.png" width="240"> | <img src="docs/img/screens/about.png" width="240"> |
+| Painted per-pixel into a PSRAM canvas: gradient sky, stars, lit clouds, a live-looking scope and a banking airliner | The last screen: build date, board, chip, hostname, IP, uptime, feed and where the source lives |
+
 | Continental fire map |
 |:---:|
 | <img src="docs/img/screens/firemap.png" width="300"> |
@@ -95,7 +100,7 @@ Long-press the screen to cycle, or pick one on the config page. All four capture
 ### The device itself
 - **Touch**: tap to inspect, **double-tap** to cycle range, **pinch** to zoom continuously,
   long-press to change theme. Swipe between **Radar / List / Stats / Weather / Tracked / Clock /
-  Fires**. Ranges run from 1 mi to 100 km.
+  Fires / About**. Ranges run from 1 mi to 100 km.
 - **Alert sounds** (ES8311 speaker): a soft cue for a new aircraft in range, an urgent one for
   emergency or military. Pick **Chime, Sonar ping, Marimba, Aircraft warning** or **Beep** per
   cue independently — or **upload your own WAV** from the config page. It's converted on the

@@ -52,7 +52,7 @@ engraved logo. No soldering — the Waveshare board carries all the electronics.
 
 **Four themes** (remembered across reboots)
 - **Phosphor** — classic green-on-black radar scope: rings, sweep, altitude colours.
-- **Capsule / Orb radar** — green grid with glowing "ball" blips emitting sonar-style
+- **Orb** — green grid with glowing "ball" blips emitting sonar-style
   rings and edge arrows for distant traffic.
 - **Amber CRT** — warm amber monochrome scope.
 - **Military** — night-vision green scope.

@@ -1429,7 +1429,7 @@ static void handleShot() {
 }
 
 static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock)
-    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 6));   // 6 = fires
+    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 7));   // 6 = fires, 7 = about
     if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
     if (g_web.hasArg("icon")) ui_preview_weather_icon(g_web.arg("icon").toInt());
     if (g_web.hasArg("mil")) radar::setMilitaryPreview(g_web.arg("mil").toInt() != 0);

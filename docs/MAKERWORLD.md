@@ -16,7 +16,7 @@ shots) until you have real photos of the printed unit.
 ## Title
 **SkyGlass — Live Flight Radar Desk Gadget (ESP32-S3 Round AMOLED, Touch)**
 
-*(Safer alt title if avoiding the Capsule nod: "Orbit Radar — Live ADS-B Flight Radar, ESP32-S3 Round AMOLED")*
+*(Alt title if a more descriptive one reads better: "SkyGlass — Live ADS-B Flight Radar, ESP32-S3 Round AMOLED")*
 
 ## Summary (one-liner)
 A 3D-printed desk gadget that shows **real aircraft flying around you, live**, on a
