@@ -53,10 +53,25 @@ void AdsbClient::begin(double homeLat, double homeLon, float rangeKm) {
 
 bool AdsbClient::poll(std::vector<Aircraft>& out) {
     if (WiFi.status() != WL_CONNECTED) return false;
-    // Try each independent provider once. Retrying the primary immediately can violate its
-    // one-request-per-second limit and adds another full timeout to an already slow failure.
-    if (fetchFrom(ADSB_PRIMARY_HOST, out)) return true;
-    return fetchFrom(ADSB_FALLBACK_HOST, out);
+    std::vector<Aircraft> primaryList;
+    bool pOk = fetchFrom(ADSB_PRIMARY_HOST, primaryList);
+    
+    // If primary returned aircraft, use them. If primary failed or returned 0, query fallback feed.
+    if (pOk && !primaryList.empty()) {
+        out.swap(primaryList);
+        return true;
+    }
+    
+    std::vector<Aircraft> fallbackList;
+    bool fOk = fetchFrom(ADSB_FALLBACK_HOST, fallbackList);
+    if (fOk && !fallbackList.empty()) {
+        out.swap(fallbackList);
+        return true;
+    }
+    
+    if (pOk) { out.swap(primaryList); return true; }
+    if (fOk) { out.swap(fallbackList); return true; }
+    return false;
 }
 
 bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
@@ -95,7 +110,7 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
     // Only keep the fields we use -> much smaller parsed document.
     JsonDocument filter(&s_jsonPsram);
     const char* keys[] = { "ac", "aircraft" };
-    const char* flds[] = { "hex", "flight", "t", "lat", "lon", "alt_baro",
+    const char* flds[] = { "hex", "flight", "t", "lat", "lon", "alt_baro", "alt_geom",
                            "track", "true_heading", "gs", "baro_rate",
                            "squawk", "seen_pos", "dbFlags" };
     for (const char* k : keys)
@@ -123,9 +138,7 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
     if (arr.isNull()) arr = doc["aircraft"].as<JsonArrayConst>();
     if (arr.isNull()) return false;
 
-    // Keep the ADSB_MAX_AIRCRAFT *nearest* aircraft (not just the first ones the feed happens to
-    // list), so busy areas still show the traffic closest to you. We gate by distance BEFORE
-    // parsing the strings, so the hundreds of far-away aircraft never allocate anything.
+    // Keep the ADSB_MAX_AIRCRAFT *nearest* aircraft
     std::vector<Aircraft> tmp;
     std::vector<float>     dist;             // parallel array: km from home for each kept aircraft
     tmp.reserve(ADSB_MAX_AIRCRAFT);
@@ -136,9 +149,22 @@ bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
         const double lat = a["lat"].as<double>();
         const double lon = a["lon"].as<double>();
 
-        // alt_baro is the string "ground" for aircraft on the ground; skip them if hide-ground is on.
-        const bool  onGround = a["alt_baro"].is<const char*>();
-        const float altFt    = onGround ? 0.0f : (a["alt_baro"] | 0.0f);
+        // Robust altitude parsing: preference alt_baro, fallback to alt_geom
+        bool onGround = false;
+        float altFt = 0.0f;
+        if (a["alt_baro"].is<const char*>()) {
+            const char* s = a["alt_baro"].as<const char*>();
+            if (s && (strcmp(s, "ground") == 0 || strcmp(s, "GROUND") == 0)) onGround = true;
+        } else if (a["alt_baro"].is<float>()) {
+            altFt = a["alt_baro"].as<float>();
+        } else if (a["alt_baro"].is<int>()) {
+            altFt = (float)a["alt_baro"].as<int>();
+        } else if (a["alt_geom"].is<float>()) {
+            altFt = a["alt_geom"].as<float>();
+        } else if (a["alt_geom"].is<int>()) {
+            altFt = (float)a["alt_geom"].as<int>();
+        }
+
         if (_hideGround && onGround) continue;
         // optional filters (applied before the cap, so slots only go to matching aircraft)
         if (_minAltFt > 0.0f && (onGround || altFt < _minAltFt)) continue;
