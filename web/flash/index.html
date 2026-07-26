@@ -31,12 +31,12 @@
     overflow: hidden; background: #000; box-shadow: inset 0 0 24px rgba(0,0,0,0.95);
   }
   #radar-svg { width: 100%; height: 100%; display: block; }
-  .sweep { transform-origin: 233px 233px; animation: spin 2.8s linear infinite; }
+  .sweep { transform-origin: 233px 233px; animation: spin 5.0s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .ac1 { animation: glow-ac1 2.8s linear infinite; }
-  .ac2 { animation: glow-ac2 2.8s linear infinite; }
-  .ac3 { animation: glow-ac3 2.8s linear infinite; }
+  .ac1 { animation: glow-ac1 5.0s linear infinite; }
+  .ac2 { animation: glow-ac2 5.0s linear infinite; }
+  .ac3 { animation: glow-ac3 5.0s linear infinite; }
 
   @keyframes glow-ac1 {
     0%, 10% { opacity: 0.4; filter: none; }
@@ -129,7 +129,7 @@
 
         <!-- Cardinal Labels -->
         <g font-family="system-ui, sans-serif" font-weight="700" text-anchor="middle">
-          <text x="233" y="40" font-size="20" fill="#eafff3">N</text>
+          <text x="233" y="40" font-size="17" fill="#eafff3">N</text>
           <text x="233" y="441" font-size="17" fill="#9affc8">S</text>
           <text x="35" y="239" font-size="17" fill="#9affc8">W</text>
           <text x="431" y="239" font-size="17" fill="#9affc8">E</text>

@@ -66,10 +66,10 @@
 // masks the angular stepping, so shortening it exposed the very judder it was meant to
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
-#define SWEEP_PERIOD_MS   2800
-#define SWEEP_FRAME_MS    16
+#define SWEEP_PERIOD_MS   5000
+#define SWEEP_FRAME_MS    20
 #define SWEEP_TRAIL_DEG   55.0f
-#define SWEEP_TRAIL_STEPS 24
+#define SWEEP_TRAIL_STEPS 45
 #define SWEEP_TRAIL_OPA   140
 
 // ---- aircraft / flow / orb config ----
@@ -379,7 +379,7 @@ static void sweep_draw_cb(lv_event_t *e) {
     const float R = (float)RADAR_R_OUTER_PX;
 
     // Draw continuous filled pie-slice triangles for a 100% smooth phosphor sector (no discrete lines)
-    const int steps = 24;
+    const int steps = 45;
     const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
     lv_draw_rect_dsc_t polyDsc;
     lv_draw_rect_dsc_init(&polyDsc);
@@ -390,7 +390,7 @@ static void sweep_draw_cb(lv_event_t *e) {
         const float a1 = s_sweepDeg - (float)i * stepDeg;
         const float a2 = s_sweepDeg - (float)(i - 1) * stepDeg;
         
-        polyDsc.bg_opa = (lv_opa_t)(frac * frac * 165.0f);
+        polyDsc.bg_opa = (lv_opa_t)(powf(frac, 1.8f) * 155.0f);
         if (polyDsc.bg_opa < 2) continue;
 
         lv_point_t pts[3];
