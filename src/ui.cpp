@@ -390,7 +390,12 @@ void ui_set_range_km(float km) {
     s_rangeKm = km;
     if (s_zoomLbl) {
         char b[20];
-        snprintf(b, sizeof(b), LV_SYMBOL_LOOP " %.0f %s", dist_val(km), dist_unit());
+        float val = dist_val(km);
+        if (fabsf(val - roundf(val)) < 0.15f) {
+            snprintf(b, sizeof(b), LV_SYMBOL_LOOP " %.0f %s", (double)roundf(val), dist_unit());
+        } else {
+            snprintf(b, sizeof(b), LV_SYMBOL_LOOP " %.1f %s", (double)val, dist_unit());
+        }
         lv_label_set_text(s_zoomLbl, b);
     }
     int best = 0; float bd = 1e9f;                 // sync the cycle index to the shown range
@@ -403,7 +408,7 @@ void ui_set_range_km(float km) {
 // Two-finger pinch on the radar continuously scales the display range. While the
 // gesture runs only the visual projection changes (preview cb); the feed re-query +
 // NVS persist (full range cb) happen once, when the last finger lifts.
-#define PINCH_RANGE_MIN_KM   5.0f
+#define PINCH_RANGE_MIN_KM   1.0f
 #define PINCH_RANGE_MAX_KM 150.0f
 static void (*s_rangePreviewCb)(float) = nullptr;
 static bool     s_pinchActive = false;
