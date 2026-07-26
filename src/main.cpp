@@ -506,38 +506,42 @@ static WebServer g_web(80);
 
 static void handleRoot() {
     const int th = radar::theme();
-    const int ranges[] = {10, 15, 25, 30, 50, 100, 150, 250};
-    // The value submitted stays in km (the device works in km); only the label is shown in
-    // the user's chosen distance unit so the config page matches the screen.
-    const float    ufac  = (g_units == 0) ? 0.539957f : (g_units == 2 ? 0.621371f : 1.0f);
-    const char    *uname = (g_units == 0) ? "nm" : (g_units == 2 ? "mi" : "km");
-    // Pinch-zoom sets any range it likes, so the live value usually isn't one of the
-    // fixed steps. Without an entry for it nothing is marked selected and the browser
-    // silently shows the first option — the page would claim 10 km while the scope ran
-    // at 37. Splice the current value into the list, in order, when it's not already one.
+    const float ranges[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 50.0f, 100.0f, 150.0f, 250.0f};
     const int nRanges = (int)(sizeof(ranges) / sizeof(ranges[0]));
-    const int curRange = (int)(g_settings.rangeKm + 0.5f);
+    const float curRange = g_settings.rangeKm;
+    const float ufac  = (g_units == 0) ? 0.539957f : (g_units == 2 ? 0.621371f : 1.0f);
+    const char *uname = (g_units == 0) ? "nm" : (g_units == 2 ? "mi" : "km");
+
+    auto fmt_opt = [ufac, uname](float km, bool sel) -> String {
+        char o[80];
+        const float val = km * ufac;
+        if (fabsf(val - roundf(val)) < 0.15f) {
+            snprintf(o, sizeof(o), "<option value=\"%.2f\"%s>%.0f %s</option>",
+                     (double)km, sel ? " selected" : "", (double)roundf(val), uname);
+        } else {
+            snprintf(o, sizeof(o), "<option value=\"%.2f\"%s>%.1f %s</option>",
+                     (double)km, sel ? " selected" : "", (double)val, uname);
+        }
+        return String(o);
+    };
+
     bool curListed = false;
-    for (int r : ranges) if (r == curRange) curListed = true;
+    for (float r : ranges) {
+        if (fabsf(r - curRange) < 0.1f) { curListed = true; break; }
+    }
+
     String ropts;
     bool spliced = curListed;
     for (int i = 0; i < nRanges; ++i) {
-        char o[72];
         if (!spliced && curRange < ranges[i]) {
-            snprintf(o, sizeof(o), "<option value=%d selected>%.0f %s</option>",
-                     curRange, curRange * ufac, uname);
-            ropts += o;
+            ropts += fmt_opt(curRange, true);
             spliced = true;
         }
-        snprintf(o, sizeof(o), "<option value=%d%s>%.0f %s</option>",
-                 ranges[i], (ranges[i] == curRange) ? " selected" : "", ranges[i] * ufac, uname);
-        ropts += o;
+        const bool sel = fabsf(ranges[i] - curRange) < 0.1f;
+        ropts += fmt_opt(ranges[i], sel);
     }
-    if (!spliced) {                       // current range is wider than every fixed step
-        char o[72];
-        snprintf(o, sizeof(o), "<option value=%d selected>%.0f %s</option>",
-                 curRange, curRange * ufac, uname);
-        ropts += o;
+    if (!spliced) {
+        ropts += fmt_opt(curRange, true);
     }
     const char *tnames[] = {"Phosphor", "Orb", "Amber CRT", "Military"};
     String topts;
