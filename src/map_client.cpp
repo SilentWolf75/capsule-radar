@@ -23,7 +23,7 @@
 #define MAP_MAX_TILES   4          // per axis (4x4 = 2 MB mosaic worst case)
 #define MAP_ZOOM_MIN    4
 #define MAP_ZOOM_MAX    13
-#define MAP_UA "CapsuleRadar/1.0 (+https://github.com/socquique/capsule-radar)"
+#define MAP_UA "SkyGlass/1.0 (+https://github.com/socquique/capsule-radar)"
 
 // CARTO basemaps: no API key, dark/light variants without labels (labels are unreadable
 // at this scale and fight with the callsign text drawn above them).

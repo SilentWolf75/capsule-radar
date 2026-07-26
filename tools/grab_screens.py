@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Capture screenshots from a running Capsule Radar and save them as PNGs.
+"""Capture screenshots from a running SkyGlass and save them as PNGs.
 
 The firmware serves its live framebuffer at /shot.bmp and switches screens via
 /view?i=N, so this walks the views and writes one PNG per screen. Photographs of a
 glossy round AMOLED never look as good as the real pixels.
 
     python tools/grab_screens.py [host] [outdir]
-    python tools/grab_screens.py capsuleradar.local docs/img/screens
+    python tools/grab_screens.py skyglass.local docs/img/screens
 
 Corners are made transparent to match the physical round panel, which is what makes
 these look right dropped into a README. Pure stdlib - no Pillow, no ffmpeg.
@@ -88,7 +88,7 @@ def write_png(path, w, h, rows, round_mask=True):
 
 
 def main():
-    host = sys.argv[1] if len(sys.argv) > 1 else "capsuleradar.local"
+    host = sys.argv[1] if len(sys.argv) > 1 else "skyglass.local"
     outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.join("docs", "img", "screens")
     os.makedirs(outdir, exist_ok=True)
 

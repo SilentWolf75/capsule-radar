@@ -1,4 +1,4 @@
-# Capsule Radar (formerly "Plane Radar 2.0") — CLAUDE.md
+# SkyGlass (formerly "Plane Radar 2.0") — CLAUDE.md
 
 Master context for Claude Code. Read this first, then `docs/` for detail.
 

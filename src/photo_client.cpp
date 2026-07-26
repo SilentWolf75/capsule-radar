@@ -13,7 +13,7 @@
 #include <TJpg_Decoder.h>
 #include <esp_heap_caps.h>
 
-#define PS_UA "CapsuleRadar/1.0 (+https://github.com/socquique/capsule-radar)"
+#define PS_UA "SkyGlass/1.0 (+https://github.com/SilentWolf75/skyglass)"
 
 // JPEG decode target (set just before drawJpg)
 static lv_color_t *s_dst = nullptr;

@@ -66,7 +66,7 @@ jobs:
 
           # A merged image is still handy for esptool users and the release page, so keep
           # producing one - it is simply not what the browser flasher writes.
-          python -m esptool --chip esp32s3 merge_bin -o site/CapsuleRadar-esp32s3.bin \
+          python -m esptool --chip esp32s3 merge_bin -o site/SkyGlass-esp32s3.bin \
             --flash_mode dio --flash_freq 80m --flash_size 16MB \
             0x0     "$B/bootloader.bin" \
             0x8000  "$B/partitions.bin" \

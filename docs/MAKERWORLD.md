@@ -1,4 +1,4 @@
-# Capsule Radar — MakerWorld listing draft
+# SkyGlass — MakerWorld listing draft
 
 Copy/paste into the MakerWorld upload form. Sections map to MakerWorld fields.
 Fill the **`‹TODO›`** placeholders once the 3D enclosure is finished (photos, print
@@ -14,7 +14,7 @@ shots) until you have real photos of the printed unit.
 ---
 
 ## Title
-**Capsule Radar — Live Flight Radar Desk Gadget (ESP32-S3 Round AMOLED, Touch)**
+**SkyGlass — Live Flight Radar Desk Gadget (ESP32-S3 Round AMOLED, Touch)**
 
 *(Safer alt title if avoiding the Capsule nod: "Orbit Radar — Live ADS-B Flight Radar, ESP32-S3 Round AMOLED")*
 
@@ -31,7 +31,7 @@ firmware, **flash it from your browser** in one click.
 
 ## Description (long)
 
-Capsule Radar turns a Waveshare round AMOLED dev board into a **live air-traffic
+SkyGlass turns a Waveshare round AMOLED dev board into a **live air-traffic
 radar** for your desk. It fetches nearby aircraft from a free ADS-B feed over WiFi and
 plots them on a phosphor-green radar scope centred on your location — rotated by
 heading, colour-coded by altitude, with fading trails and an animated sweep. Tap any
@@ -54,7 +54,7 @@ speaker, a small kickstand foot, and an engraved logo. Snap-/screw-together, no 
 - 🎨 **Four themes** (long-press to switch): phosphor scope, a retro "orb" radar skin,
   amber CRT, and night-vision green.
 - 🔁 **On-screen zoom** button (10–100 km) and a **web config page** at
-  `capsuleradar.local` (centre point, range, theme, brightness, sound, dim timer).
+  `skyglass.local` (centre point, range, theme, brightness, sound, dim timer).
 - 🔊 **Alert pings** (built-in speaker): a soft ping for new contacts, an urgent beep
   for emergency/military squawks. Volume + mute on the web.
 - 🔋 **Battery-aware** (optional LiPo): on-screen %, low warning, slower polling on
@@ -98,7 +98,7 @@ speaker, a small kickstand foot, and an engraved logo. Snap-/screw-together, no 
 **Parts (5):**
 1. **Outer tactile ring** — the rounded, knurled bezel band.
 2. **Front mount ring / inner bezel** — holds the board; round screen window + screw bosses.
-3. **Back plate / lid** — engraved "Capsule Radar" logo on the outside.
+3. **Back plate / lid** — engraved "SkyGlass" logo on the outside.
 4. **Top crown** — decorative (the "antenna" nub), press-fit.
 5. **Kickstand foot** — the angled wedge that tilts the unit upright.
 
@@ -120,11 +120,11 @@ speaker, a small kickstand foot, and an engraved logo. Snap-/screw-together, no 
 ## Flash & set up (no toolchain)
 1. Open the **web flasher**: https://socquique.github.io/capsule-radar/ (Chrome/Edge desktop).
 2. Plug the board in with a USB-C **data** cable, click **Install**, pick the serial port.
-3. On first boot, join the **`CapsuleRadar-Setup`** WiFi from your phone and enter your
+3. On first boot, join the **`SkyGlass-Setup`** WiFi from your phone and enter your
    network + home location.
-4. Fine-tune anything later at **`http://capsuleradar.local/`**.
+4. Fine-tune anything later at **`http://skyglass.local/`**.
 
-Prefer a file? Download `CapsuleRadar-esp32s3.bin` from the
+Prefer a file? Download `SkyGlass-esp32s3.bin` from the
 [GitHub Releases](https://github.com/socquique/capsule-radar/releases) and flash to
 offset `0x0` with esptool. Build from source with PlatformIO if you like.
 

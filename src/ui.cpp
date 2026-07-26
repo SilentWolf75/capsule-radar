@@ -1441,7 +1441,7 @@ void ui_splash_show(void) {
 
     // Branded Title
     lv_obj_t *title = lv_label_create(cont);
-    lv_label_set_text(title, "CAPSULE RADAR");
+    lv_label_set_text(title, "SKYGLASS");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(title, UI_GREEN, 0);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 118);
@@ -1603,7 +1603,7 @@ void ui_create(void) {
     lv_obj_t *ver = lv_label_create(sp);            // firmware version (so users can tell what's flashed)
     lv_obj_set_style_text_font(ver, F12(), 0);
     lv_obj_set_style_text_color(ver, UI_DIM, 0);
-    lv_label_set_text(ver, "Capsule Radar v" FW_VERSION);
+    lv_label_set_text(ver, "SkyGlass v" FW_VERSION);
     lv_obj_align(ver, LV_ALIGN_CENTER, 0, 170);
 
     // --- weather tile (current conditions + next three days) ---

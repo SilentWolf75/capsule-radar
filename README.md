@@ -1,11 +1,11 @@
-# Capsule Radar 🛩️
+# SkyGlass 🛩️
 
 <p align="center">
-  <a href="https://silentwolf75.github.io/capsule-radar/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
+  <a href="https://silentwolf75.github.io/skyglass/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
   <img src="https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white" alt="Board: ESP32-S3 round AMOLED">
-  <a href="https://github.com/SilentWolf75/capsule-radar/releases"><img src="https://img.shields.io/github/v/tag/SilentWolf75/capsule-radar?label=firmware&color=7B42BC" alt="Firmware version"></a>
+  <a href="https://github.com/SilentWolf75/skyglass/releases"><img src="https://img.shields.io/github/v/tag/SilentWolf75/skyglass?label=firmware&color=7B42BC" alt="Firmware version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/code-MIT-2088FF" alt="License: MIT"></a>
-  <a href="https://github.com/SilentWolf75/capsule-radar/stargazers"><img src="https://img.shields.io/github/stars/SilentWolf75/capsule-radar?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/SilentWolf75/skyglass/stargazers"><img src="https://img.shields.io/github/stars/SilentWolf75/skyglass?style=social" alt="GitHub stars"></a>
 </p>
 
 A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75** — a round
@@ -17,7 +17,7 @@ It also does weather, a continental wildfire map, marine traffic, a clock face, 
 itself over WiFi.
 
 <p align="center">
-  <img src="docs/img/screens/radar.png" width="380" alt="Capsule Radar scope with 18 aircraft in range">
+  <img src="docs/img/screens/radar.png" width="380" alt="SkyGlass scope with 18 aircraft in range">
 </p>
 <p align="center"><sub>18 aircraft in range over Kansas City — Delta, SkyWest, Mesa, Southwest and a NetJets bizjet, each drawn by type, coloured by altitude, over a CARTO basemap with four airports labelled.</sub></p>
 
@@ -125,7 +125,7 @@ the board definition rather than guessed.
 
 ## Flash from your browser (no toolchain)
 
-1. Open the **[web flasher](https://silentwolf75.github.io/capsule-radar/)** in Chrome or Edge.
+1. Open the **[web flasher](https://silentwolf75.github.io/skyglass/)** in Chrome or Edge.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
 
 > Leave **Erase device** unticked to keep your WiFi credentials, settings and uploaded alert
@@ -149,7 +149,7 @@ pio device monitor -b 115200
 ```
 
 On first flash you may need to hold **BOOT** then tap **RESET**. On first boot, connect a phone
-to the **`CapsuleRadar-Setup`** WiFi and enter your home network — aircraft appear within
+to the **`SkyGlass-Setup`** WiFi and enter your home network — aircraft appear within
 seconds.
 
 ## Update over WiFi (no cable)
@@ -158,22 +158,22 @@ Easiest is the config page: **Check for update**, then **Install**. To push a lo
 instead:
 
 ```bash
-curl -X POST -F "f=@.pio/build/esp32-s3-amoled-175/firmware.bin" http://capsuleradar.local/update
+curl -X POST -F "f=@.pio/build/esp32-s3-amoled-175/firmware.bin" http://skyglass.local/update
 ```
 
-Or upload `firmware.bin` by hand at `http://capsuleradar.local/update`. Use the **app-only**
+Or upload `firmware.bin` by hand at `http://skyglass.local/update`. Use the **app-only**
 image here, never the merged one.
 
 ## Configuration
 
-Browse to `http://capsuleradar.local/` (or the device IP) on the same WiFi: centre point with a
+Browse to `http://skyglass.local/` (or the device IP) on the same WiFi: centre point with a
 map picker, display range, theme, time zone, brightness, map background and visibility, aircraft
 filters, marine and wildfire layers and their API keys, quiet hours, sounds, firmware update and
 WiFi reset. Settings persist in NVS.
 
 ### Diagnostics
 
-`http://capsuleradar.local/diag` returns a health snapshot as JSON — free heap, minimum heap
+`http://skyglass.local/diag` returns a health snapshot as JSON — free heap, minimum heap
 since boot, largest contiguous internal block, free PSRAM, aircraft counts, and why the last
 photo fetch succeeded or failed. It exists so those numbers can be read over WiFi instead of
 only from a serial cable:
@@ -189,7 +189,7 @@ only from a serial cable:
 transparent to match the round panel. Pure stdlib — no Pillow, no ffmpeg:
 
 ```bash
-python tools/grab_screens.py capsuleradar.local docs/img/screens
+python tools/grab_screens.py skyglass.local docs/img/screens
 ```
 
 It drives the firmware's own `/view` and `/shot.bmp` endpoints, so it can select a contact,
@@ -247,10 +247,10 @@ notice. Several features here were adapted from
 
 Related work worth knowing about:
 
-- **[Capsule Radar for the Waveshare ESP32-S3-Touch-LCD-2.1](https://github.com/alexzogh/capsule-radar/tree/port/esp32-s3-lcd-21)**
+- **[SkyGlass for the Waveshare ESP32-S3-Touch-LCD-2.1](https://github.com/alexzogh/skyglass/tree/port/esp32-s3-lcd-21)**
   by **@alexzogh** — a port to the 2.1" round LCD (ST7701).
 - A 3D-printed enclosure for this board is published by the original author on
-  **[MakerWorld](https://makerworld.com/en/models/2907695-capsule-radar-live-flight-radar-desk-gadget)**.
+  **[MakerWorld](https://makerworld.com/en/models/2907695-skyglass-live-flight-radar-desk-gadget)**.
 
 ## Data & license
 

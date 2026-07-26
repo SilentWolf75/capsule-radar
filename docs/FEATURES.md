@@ -1,4 +1,4 @@
-# Features — Capsule Radar
+# Features — SkyGlass
 
 Visual target: `assets/plane_radar_2.0_mockup.html`.
 

@@ -1,4 +1,4 @@
-// Capsule Radar — entry point / glue. SKELETON: TODOs mark what to implement.
+// SkyGlass — entry point / glue. SKELETON: TODOs mark what to implement.
 // Order of work is in CLAUDE.md (milestones). Bring up the Waveshare demo first.
 #include <Arduino.h>
 #include <WiFi.h>
@@ -44,7 +44,7 @@
 #include <Preferences.h>            // NVS (persist theme/settings)
 #include <time.h>                   // NTP/RTC clock + date
 #include <WebServer.h>              // configuration web page
-#include <ESPmDNS.h>                // http://capsuleradar.local
+#include <ESPmDNS.h>                // http://skyglass.local
 #include <ArduinoOTA.h>             // OTA firmware update over WiFi (PlatformIO/espota)
 #include <Update.h>                 // browser OTA: self-flash an uploaded .bin
 #include <esp_heap_caps.h>          // largest-free-block metric (heap health)
@@ -157,7 +157,7 @@ static void adsb_task(void*) {
             WiFi.setSleep(false);
             Serial.printf("[adsb] WiFi up, IP %s\n", WiFi.localIP().toString().c_str());
             configTzTime(g_tz.c_str(), "pool.ntp.org", "time.nist.gov");  // local time (web-configurable TZ)
-            Serial.println("[web] config: http://capsuleradar.local/  (or the IP above)");
+            Serial.println("[web] config: http://skyglass.local/  (or the IP above)");
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
@@ -695,7 +695,7 @@ static void handleRoot() {
     const int needed = snprintf(buf, BUFSZ,
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Capsule Radar</title>"
+        "<title>SkyGlass</title>"
         "<link rel=stylesheet href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'>"
         "<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>"
         "<style>"
@@ -741,7 +741,7 @@ static void handleRoot() {
         "<g class=sweep><path d='M233,233 L100,55 A220,220 0 0 1 326,33.6 Z' fill='url(#sweepGrad)'/><line x1='233' y1='233' x2='326' y2='33.6' stroke='#3dff9a' stroke-width='2' stroke-opacity='0.85' filter='url(#glow)'/></g>"
         "<g font-family='sans-serif' font-weight='700' text-anchor='middle'><text x='233' y='40' font-size='17' fill='#eafff3'>N</text><text x='233' y='441' font-size='17' fill='#9affc8'>S</text><text x='35' y='239' font-size='17' fill='#9affc8'>W</text><text x='431' y='239' font-size='17' fill='#9affc8'>E</text></g>"
         "<g font-family='monospace'><g class=ac1 transform='translate(322,150)' style='color:#c8ff3c'><path d='M0,0 L26,26' stroke='#c8ff3c' stroke-width='2' stroke-opacity='0.22' stroke-dasharray='2 5'/><path d='M0,-9 L2,-1 L9,3 L2,3 L3,8 L0,6.5 L-3,8 L-2,3 L-9,3 L-2,-1 Z' fill='#c8ff3c' transform='rotate(225)'/></g><g class=ac2 transform='translate(252,74)' style='color:#3ce0ff'><path d='M0,0 L0,-26' stroke='#3ce0ff' stroke-width='2' stroke-opacity='0.22' stroke-dasharray='2 5'/><path d='M0,-9 L2,-1 L9,3 L2,3 L3,8 L0,6.5 L-3,8 L-2,3 L-9,3 L-2,-1 Z' fill='#3ce0ff' transform='rotate(180)'/></g><g class=ac3 transform='translate(118,236)' style='color:#ffb23c'><path d='M0,0 L-26,-4' stroke='#ffb23c' stroke-width='2' stroke-opacity='0.22' stroke-dasharray='2 5'/><path d='M0,-9 L2,-1 L9,3 L2,3 L3,8 L0,6.5 L-3,8 L-2,3 L-9,3 L-2,-1 Z' fill='#ffb23c' transform='rotate(90)'/></g></g>"
-        "</svg></div></div><div><h1>Capsule Radar</h1><p class=sub>Live ADS-B radar &middot; configuration</p></div></div>"
+        "</svg></div></div><div><h1>SkyGlass</h1><p class=sub>Live ADS-B radar &middot; configuration</p></div></div>"
         "<div class=card><div class=t>Location &amp; range</div><form method=POST action=/save>"
         "<label>Center point &mdash; tap the map or drag the pin</label>"
         "<div id=map></div>"
@@ -849,7 +849,7 @@ static void handleRoot() {
         "<div class=card><div class=t>Network</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
         "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
-        "<p class=ft>Reach me at <code>capsuleradar.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
+        "<p class=ft>Reach me at <code>skyglass.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
         "var C=[%.5f,%.5f];var MAP=L.map('map').setView(C,10);"
         "L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'(c) OpenStreetMap'}).addTo(MAP);"
@@ -985,7 +985,7 @@ static void handleSave() {
 static void handleWifi() {
     g_web.send(200, "text/html",
         "<body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
-        "WiFi reset. Connect to the <b>CapsuleRadar-Setup</b> network to reconfigure.</body>");
+        "WiFi reset. Connect to the <b>SkyGlass-Setup</b> network to reconfigure.</body>");
     delay(400);                     // let the response reach the browser
     // The driver stores the saved AP in its own NVS namespace ("nvs.net80211"). On Arduino
     // core 3.x both wm.resetSettings() and WiFi.disconnect(true,true) can silently no-op
@@ -1520,7 +1520,7 @@ static void handleUpdatePage() {
     g_web.send(200, "text/html",
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Capsule Radar - Update</title><style>"
+        "<title>SkyGlass - Update</title><style>"
         "body{background:radial-gradient(circle at 50% -10%,#0a1f15,#04100a 70%);color:#cdd6d1;"
         "font-family:system-ui,sans-serif;margin:0 auto;padding:20px;max-width:480px;min-height:100vh}"
         "h1{color:#1dff86;font-size:20px}.card{background:rgba(10,20,14,.85);border:1px solid #1f3a2b;border-radius:14px;padding:16px}"
@@ -1531,7 +1531,7 @@ static void handleUpdatePage() {
         "#fill{height:100%;width:0;background:#1dff86;transition:width .2s}#msg{margin-top:10px;color:#9affc8;font-size:13px}"
         "a{color:#1dff86}p{color:#9affc8;font-size:13px}"
         "</style></head><body><h1>Firmware update (OTA)</h1><div class=card>"
-        "<p>Upload the <b>app firmware</b> <code>CapsuleRadar-ota.bin</code> from the GitHub release. "
+        "<p>Upload the <b>app firmware</b> <code>SkyGlass-ota.bin</code> from the GitHub release. "
         "Do NOT use the merged flash image here.</p>"
         "<input type=file id=f accept='.bin'>"
         "<button onclick=u()>Update over WiFi</button>"
@@ -1562,7 +1562,7 @@ static void handleUpdateUpload() {
 void setup() {
     Serial.begin(115200);
     delay(200);
-    Serial.println("\nCapsule Radar boot");
+    Serial.println("\nSkyGlass boot");
 
     if (PIN_LCD_SCLK < 0 || PIN_I2C_SDA < 0) {
         Serial.println("[!] Pins in config.h are still -1. Copy them from the Waveshare demo.");
@@ -1644,10 +1644,10 @@ void setup() {
     // radar::init() runs inside display::begin() (LVGL must be up first).
 
     // --- WiFi (captive portal, non-blocking) ------------------------------
-    // First boot opens the "CapsuleRadar-Setup" AP to enter WiFi creds. Non-blocking
+    // First boot opens the "SkyGlass-Setup" AP to enter WiFi creds. Non-blocking
     // so the radar keeps animating while you configure WiFi from your phone.
     g_wm.setConfigPortalBlocking(false);
-    g_wm.setTitle("Capsule Radar");
+    g_wm.setTitle("SkyGlass");
     // light phosphor-green theme for the captive portal (small CSS, injected into <head>)
     g_wm.setCustomHeadElement(
         "<style>"
@@ -1666,10 +1666,10 @@ void setup() {
         Serial.println("[wifi] new credentials saved -> rebooting for a clean web/mDNS start");
         g_rebootAtMs = millis() + 2500;   // let the portal deliver its 'saved' page first
     });
-    if (g_wm.autoConnect("CapsuleRadar-Setup"))
+    if (g_wm.autoConnect("SkyGlass-Setup"))
         Serial.println("[wifi] connected");
     else
-        Serial.println("[wifi] config portal open - join 'CapsuleRadar-Setup' to set WiFi; UI stays live");
+        Serial.println("[wifi] config portal open - join 'SkyGlass-Setup' to set WiFi; UI stays live");
 
     // --- OTA ---------------------------------------------------------------
     // ArduinoOTA is started from loop() once WiFi connects (see otaUp there).
@@ -1687,7 +1687,7 @@ void setup() {
     g_ac_mutex = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(adsb_task, "adsb", 16384, nullptr, 1, nullptr, 0);  // TLS needs a big stack
 
-    // configuration web page (http://capsuleradar.local/)
+    // configuration web page (http://skyglass.local/)
     g_web.on("/", handleRoot);
     g_web.on("/save", HTTP_POST, handleSave);
     g_web.on("/wifi", HTTP_POST, handleWifi);
@@ -1768,7 +1768,7 @@ void loop() {
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
     static bool otaUp = false;
     if (!otaUp && WiFi.status() == WL_CONNECTED) {
-        ArduinoOTA.setHostname("capsuleradar");        // -> capsuleradar.local (registers mDNS)
+        ArduinoOTA.setHostname("skyglass");        // -> skyglass.local (registers mDNS)
         ArduinoOTA.begin();
         MDNS.addService("http", "tcp", 80);            // advertise the config web page
         otaUp = true;
@@ -1843,10 +1843,10 @@ void loop() {
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
-            snprintf(net, sizeof(net), "Configure at\ncapsuleradar.local\n%s  |  %.5f, %.5f",
+            snprintf(net, sizeof(net), "Configure at\nskyglass.local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
         else
-            snprintf(net, sizeof(net), "WiFi setup:\njoin CapsuleRadar-Setup");
+            snprintf(net, sizeof(net), "WiFi setup:\njoin SkyGlass-Setup");
         ui_set_netinfo(net);
         const bool bpresent = battery_present();
         ui_set_battery(battery_percent(), battery_charging(), bpresent);

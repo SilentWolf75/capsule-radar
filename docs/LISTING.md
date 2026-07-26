@@ -1,4 +1,4 @@
-# Capsule Radar — Live Flight Radar Desk Gadget
+# SkyGlass — Live Flight Radar Desk Gadget
 
 > Publication-ready English copy for MakerWorld / Printables / a product page.
 > Fill the **`‹TODO›`** placeholders (print profile, fasteners, LiPo size) from your
@@ -13,7 +13,7 @@
 
 ## Overview
 
-Capsule Radar is a 3D-printed desk gadget that shows **live air traffic around your
+SkyGlass is a 3D-printed desk gadget that shows **live air traffic around your
 location**. It pulls nearby aircraft from a free online ADS-B feed over Wi-Fi and plots
 them on a glowing round radar scope, rotated by heading and colour-coded by altitude,
 with an animated sweep and fading trails. Tap any aircraft to see its full details — even
@@ -76,7 +76,7 @@ engraved logo. No soldering — the Waveshare board carries all the electronics.
 - **Face-down sleep**: flip the device over to turn the screen off (motion sensor).
 
 **Configuration & updates**
-- A built-in **web page** at `http://capsuleradar.local/` to set the **centre point
+- A built-in **web page** at `http://skyglass.local/` to set the **centre point
   (pick it on an interactive map)**, display range, theme, brightness, sound, idle-dim
   timeout, reset Wi-Fi, and **update the firmware over Wi-Fi**.
 - All settings persist on the device. First boot opens a Wi-Fi setup hotspot.
@@ -145,11 +145,11 @@ You don't need any toolchain.
 3. Click **Install**, choose the serial port, and pick **Erase + Install** the first time.
 
 **Option B — download the binary**
-- Grab `CapsuleRadar-esp32s3.bin` from the
+- Grab `SkyGlass-esp32s3.bin` from the
   [GitHub releases](https://github.com/socquique/capsule-radar/releases) and flash it to
   offset `0x0`:
   ```
-  esptool.py --chip esp32s3 write_flash 0x0 CapsuleRadar-esp32s3.bin
+  esptool.py --chip esp32s3 write_flash 0x0 SkyGlass-esp32s3.bin
   ```
 
 **Option C — build from source** with PlatformIO:
@@ -165,10 +165,10 @@ pio run -e esp32-s3-amoled-175 -t upload
 ## First-time setup
 
 1. After flashing, power the device. On first boot it creates a Wi-Fi hotspot named
-   **`CapsuleRadar-Setup`**.
+   **`SkyGlass-Setup`**.
 2. Join that hotspot from your phone; a setup page opens. Enter your home Wi-Fi.
 3. The radar connects and real aircraft appear within seconds.
-4. Open **`http://capsuleradar.local/`** on any device on the same network to fine-tune:
+4. Open **`http://skyglass.local/`** on any device on the same network to fine-tune:
    - **Centre point** — tap the **interactive map** or drag the pin (or type lat/lon).
    - **Display range**, **theme**, **brightness**, **sound** (volume / mute / test),
      **dim-screen-after** timeout.
@@ -180,8 +180,8 @@ pio run -e esp32-s3-amoled-175 -t upload
 
 Once it's running, you can update wirelessly:
 
-1. Open **`http://capsuleradar.local/update`** (also linked from the config page).
-2. Upload **`CapsuleRadar-ota.bin`** (the *app* image from the GitHub release — **not**
+1. Open **`http://skyglass.local/update`** (also linked from the config page).
+2. Upload **`SkyGlass-ota.bin`** (the *app* image from the GitHub release — **not**
    the merged flash image).
 3. A progress bar runs and the device reboots into the new firmware.
 
@@ -198,7 +198,7 @@ Once it's running, you can update wirelessly:
 | Change zoom range | **Tap the range button** (⟳ … km) |
 | Change theme | **Long-press** the screen |
 | Turn the screen off | **Flip it face-down** |
-| Find the config page | See the **Stats** view footer (shows `capsuleradar.local` + IP) |
+| Find the config page | See the **Stats** view footer (shows `skyglass.local` + IP) |
 
 ---
 
@@ -207,11 +207,11 @@ Once it's running, you can update wirelessly:
 - **No aircraft showing** — check Wi-Fi (the HUD Wi-Fi icon is red if disconnected, amber
   if the feed is failing) and that your centre point is set near you. Quiet areas/times
   simply have little traffic.
-- **Can't reach `capsuleradar.local`** — use the **IP** shown on the Stats view instead.
+- **Can't reach `skyglass.local`** — use the **IP** shown on the Stats view instead.
 - **No sound** — check Volume isn't 0 / Mute is off on the web page, and that the speaker
   is connected. Use the **Test ping** button.
 - **Lost/changed Wi-Fi** — open the web page → **Reset Wi-Fi**, then rejoin
-  `CapsuleRadar-Setup`.
+  `SkyGlass-Setup`.
 
 ---
 

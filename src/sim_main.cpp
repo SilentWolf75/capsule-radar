@@ -1,4 +1,4 @@
-// Native (Mac/Linux) LVGL simulator for Capsule Radar.
+// Native (Mac/Linux) LVGL simulator for SkyGlass.
 // Runs the SAME LVGL UI (include/lv_conf.h + ui_boot) in an SDL2 window — no
 // hardware, no Arduino_GFX. Only compiled for the `native` PlatformIO env.
 //
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
         printf("[sim] SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
-    s_win = SDL_CreateWindow("Capsule Radar (sim)",
+    s_win = SDL_CreateWindow("SkyGlass (sim)",
                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                              SIM_W, SIM_H, SDL_WINDOW_ALLOW_HIGHDPI);
     s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -233,7 +233,7 @@ int main(int argc, char **argv) {
         cloud_image_commit(1784397900UL, HOME_LAT_DEFAULT, HOME_LON_DEFAULT);
     }
     ui_on_data_updated();
-    printf("[sim] Capsule Radar simulator running (%dx%d) with 6 mock aircraft.\n", SIM_W, SIM_H);
+    printf("[sim] SkyGlass simulator running (%dx%d) with 6 mock aircraft.\n", SIM_W, SIM_H);
 
     Uint32 last = SDL_GetTicks();
     Uint32 lastData = last;
@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
             ui_set_status(true, true, -58, clk);   // mock: connected, fresh, strong signal
             ui_set_battery(78, false, true);   // mock battery
             ui_set_date("08 Jun 2026");        // mock date
-            ui_set_netinfo("Configure at\ncapsuleradar.local\n192.168.1.42");  // mock net info
+            ui_set_netinfo("Configure at\nskyglass.local\n192.168.1.42");  // mock net info
         }
         // fulfil route lookups with a mock (the sim has no network)
         char wc[12];
