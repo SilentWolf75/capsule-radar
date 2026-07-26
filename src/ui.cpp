@@ -1061,7 +1061,7 @@ static void fire_draw_cb(lv_event_t *e) {
 static void build_fires(void) {
     if (!s_fireTitle) return;
     const bool zoomed = firemap_is_zoomed();
-    lv_label_set_text(s_fireTitle, zoomed ? "FIRES - AREA" : "FIRES - N AMERICA");
+    lv_label_set_text(s_fireTitle, zoomed ? "FIRES - VIIRS HIGH-RES" : "FIRES - MODIS OVERVIEW");
     if (zoomed) lv_obj_clear_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
     else        lv_obj_add_flag(s_fireBack, LV_OBJ_FLAG_HIDDEN);
 
@@ -1087,7 +1087,6 @@ static void build_fires(void) {
 
 static void fire_tap_cb(lv_event_t *e) {
     (void)e;
-    if (firemap_is_zoomed()) return;              // already zoomed; use Back
     lv_indev_t *indev = lv_indev_get_act();
     if (!indev) return;
     lv_point_t p;
@@ -1097,8 +1096,13 @@ static void fire_tap_cb(lv_event_t *e) {
     firemap_unproject(p.x, p.y, SCREEN_CX, SCREEN_CY + 8,
                       FIREMAP_HALF_W, FIREMAP_HALF_H, &lat, &lon);
 
-    // Zoom to a box around the tap. Wide enough to keep context, tight enough that the
-    // finer VIIRS product is worth fetching.
+    // Clamp coordinates to valid North American bounds
+    if (lat < 15.0)  lat = 15.0;
+    if (lat > 70.0)  lat = 70.0;
+    if (lon < -165.0) lon = -165.0;
+    if (lon > -55.0)  lon = -55.0;
+
+    // Zoom or re-center the high-resolution VIIRS view around the tap
     FireView v;
     v.west  = lon - 6.0; v.east  = lon + 6.0;
     v.south = lat - 4.5; v.north = lat + 4.5;
