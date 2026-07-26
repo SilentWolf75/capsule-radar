@@ -86,6 +86,7 @@ void setTrailLength(int level);                  // 0=off 1=short 2=medium 3=lon
 void setMaxOnScreen(int n);                       // how many (nearest) aircraft to draw on the scope
 void setTracked(const char* hex);                 // pin a contact so the on-screen cap never drops it
 const char* tracked();                            // "" when nothing is tracked
+void setMapOpacity(int percent);                 // 0..100% map background visibility
 void setLargeText(bool on);                       // accessibility: bigger glyph labels. Call BEFORE init()
 
 } // namespace radar

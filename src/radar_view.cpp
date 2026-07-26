@@ -103,6 +103,7 @@ static bool       s_sweepEnabled    = true;
 static bool       s_airportsEnabled = true;
 static bool       s_firesEnabled    = true;
 static int        s_trafficMode     = radar::TRAFFIC_AIR;
+static int        s_mapOpacity      = 85;
 static bool       s_typeIcons       = true;   // per-type silhouettes vs the plain dart
 // Diagnostic: draw every contact as military. Military traffic is rare enough that the
 // marker would otherwise only be checked the first time one happens to fly past.
@@ -1020,6 +1021,8 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
                              fabs(mlon - s.homeLon) < 0.02 &&
                              fabsf(mrange - s.rangeKm) < 0.5f;
         if (matches) {
+            lv_opa_t lvOpa = (lv_opa_t)((s_mapOpacity * 255) / 100);
+            lv_obj_set_style_img_opa(s_mapCanvas, lvOpa, LV_PART_MAIN);
             if (ver != shownVer) {
                 lv_canvas_set_buffer(s_mapCanvas, (void *)px, MAP_BG_SIZE, MAP_BG_SIZE,
                                      LV_IMG_CF_TRUE_COLOR);
@@ -1027,9 +1030,9 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
                 lv_obj_center(s_mapCanvas);
                 lv_obj_move_background(s_mapCanvas);
                 shownVer = ver;
-                lv_obj_invalidate(s_mapCanvas);
             }
             lv_obj_clear_flag(s_mapCanvas, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_invalidate(s_mapCanvas);
         } else {
             lv_obj_add_flag(s_mapCanvas, LV_OBJ_FLAG_HIDDEN);
         }
@@ -1265,6 +1268,17 @@ bool positionByHex(const char *hex, double *lat, double *lon) {
 
 void setTracked(const char *hex) { s_trackHex = (hex && hex[0]) ? hex : ""; }
 const char *tracked() { return s_trackHex.c_str(); }
+
+void setMapOpacity(int percent) {
+    if (percent < 0)   percent = 0;
+    if (percent > 100) percent = 100;
+    s_mapOpacity = percent;
+    if (s_mapCanvas) {
+        lv_opa_t lvOpa = (lv_opa_t)((percent * 255) / 100);
+        lv_obj_set_style_img_opa(s_mapCanvas, lvOpa, LV_PART_MAIN);
+        lv_obj_invalidate(s_mapCanvas);
+    }
+}
 
 void tickSweep() { /* sweep self-animates via lv_timer */ }
 

@@ -1262,6 +1262,7 @@ static void handleMapOpa() {
     if (g_web.hasArg("v")) {
         g_mapOpa = constrain((int)g_web.arg("v").toInt(), 0, 100);
         map_client_set_opacity(g_mapOpa);
+        radar::setMapOpacity(g_mapOpa);
         if (g_web.hasArg("save")) {
             Preferences p;
             p.begin("capsuleradar", false);
