@@ -1439,6 +1439,9 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
         radar::select(g_web.arg("sel").toInt());
         ui_on_data_updated();
     }
+    // Track the currently selected contact (1) or clear tracking (0). TRACK is otherwise
+    // a button on the detail card, which left the Tracked view uncapturable remotely.
+    if (g_web.hasArg("trk")) ui_track_selected(g_web.arg("trk").toInt() != 0);
     if (g_web.hasArg("selhex")) {          // stable across polls, unlike the index
         const bool hit = radar::selectByHex(g_web.arg("selhex").c_str());
         ui_on_data_updated();
@@ -1721,16 +1724,16 @@ void setup() {
     // Health snapshot. Exists because the interesting numbers (contiguous internal heap,
     // PSRAM headroom) previously only reached serial, which needs a cable attached.
     g_web.on("/diag", []() {
-        char j[288];
+        char j[384];
         snprintf(j, sizeof(j),
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
-                 "\"feed_cap\":%d,\"fires\":%d}",
+                 "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\"}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
-                 ADSB_MAX_AIRCRAFT, wildfire_count());
+                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get());
         g_web.send(200, "application/json", j);
     });
     g_web.on("/fwupd", handleFwUpd);

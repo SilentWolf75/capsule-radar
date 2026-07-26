@@ -151,8 +151,9 @@ If you want max sharing with attribution, CC BY 4.0; avoid commercial-use licens
 - **Finished promo graphics** (EN + ES) of the assembled unit — use the English one as
   the **cover image**; great call-outs (display, Wi-Fi app, USB-C/battery, tactile ring,
   beep alert, detailed flight view, interior shot).
-- `docs/img/radar.gif` — animated hero shot of the live scope.
-- `docs/img/radar.png`, `orb.png`, `amber.png`, `military.png` — the four themes.
+- `docs/img/screens/radar.png` — hero shot of the live scope with traffic in range.
+- `docs/img/theme-phosphor.png`, `theme-orb.png`, `theme-amber.png`, `theme-military.png` —
+  the four themes, captured off the device.
 - The **interior photo** (board + speaker in the shell) is perfect for the "what's
   inside / assembly" gallery.
 - ‹TODO› — a couple of plain desk photos of the real unit (lit screen) also help.

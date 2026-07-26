@@ -3,7 +3,8 @@
 // Pure LVGL, portable (device + SDL simulator). Builds on top of radar_view.
 #include <stddef.h>   // size_t (ui_format_clock)
 void ui_create(void);            // build the whole UI on the active screen
-void ui_on_data_updated(void);   // refresh card/list/stats after radar::update()
+void ui_on_data_updated(void);
+void ui_track_selected(bool on);   // remote equivalent of the card TRACK button (/view?trk=)
 void ui_show_view(int idx);      // 0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock, 6 fires
 void ui_set_status(bool wifiUp, bool feedOk, int rssi, const char *clock);  // HUD: signal bars (count=RSSI, colour: red=down, amber=stale feed, white=ok) + clock
 void ui_set_battery(int pct, bool charging, bool present);  // top HUD battery indicator

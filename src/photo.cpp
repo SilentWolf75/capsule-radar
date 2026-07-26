@@ -13,6 +13,7 @@
 static std::mutex  s_m;
 static lv_color_t *s_buf = nullptr;
 static char s_want[10] = "", s_doneHex[10] = "", s_credit[40] = "";
+static char s_note[56] = "";
 static int  s_w = 0, s_h = 0;
 static bool s_ready = false;
 
@@ -79,6 +80,13 @@ bool photo_get(const char *hex, int *w, int *h, char *credit, size_t cn) {
     }
     return false;
 }
+
+void photo_note(const char *why) {
+    std::lock_guard<std::mutex> g(s_m);
+    snprintf(s_note, sizeof(s_note), "%s", why ? why : "");
+}
+
+const char *photo_note_get(void) { return s_note; }
 
 bool photo_done(const char *hex) {
     std::lock_guard<std::mutex> g(s_m);

@@ -968,6 +968,26 @@ static void track_btn_cb(lv_event_t *) {
     build_tracked();
 }
 
+// Same effect as pressing TRACK on the detail card, minus the finger. The UI keeps its
+// own tracked hex (the radar layer's copy only pins the contact against the on-screen
+// cap), so a remote capture has to go through here or the Tracked view stays empty.
+void ui_track_selected(bool on) {
+    if (!on) {
+        s_trackHex[0] = 0;
+        s_trackCall[0] = 0;
+        radar::setTracked("");
+    } else {
+        AcInfo in;
+        if (!radar::selected(in)) return;
+        snprintf(s_trackHex,  sizeof(s_trackHex),  "%s", in.hex);
+        snprintf(s_trackCall, sizeof(s_trackCall), "%s", in.call);
+        radar::setTracked(in.hex);
+        if (in.call[0]) route_request(in.call);
+    }
+    refresh_card();
+    build_tracked();
+}
+
 // ------------------------------------------------------------------- fires tile
 // A continental fire map. Deliberately not the radar scope: wildfires are a regional
 // phenomenon and the scope's range would have to be absurd to show any. Coastline comes

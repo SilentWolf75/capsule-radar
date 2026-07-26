@@ -16,3 +16,9 @@ void photo_commit(int w, int h, const char *hex, const char *credit);  // ready 
 void photo_fail(const char *hex, bool transient);
 bool photo_get(const char *hex, int *w, int *h, char *credit, size_t cn);  // ready & matches?
 bool photo_done(const char *hex);                    // fetch finished for this hex (with or without a photo)
+
+// Why the last fetch ended the way it did. Every branch in photo_client records one,
+// so "no photo on the card" can be diagnosed over WiFi (/diag) instead of only from a
+// serial cable. Purely diagnostic; nothing behavioural depends on it.
+void photo_note(const char *why);
+const char *photo_note_get(void);
