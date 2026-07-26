@@ -124,7 +124,8 @@ Long-press the screen to cycle, or pick one on the config page — **Phosphor**,
 
 ## Hardware
 
-Waveshare **ESP32-S3-Touch-AMOLED-1.75**: ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300**
+Waveshare **[ESP32-S3-Touch-AMOLED-1.75](https://www.amazon.com/dp/B0F886SYQ6)**
+(ASIN `B0F886SYQ6`): ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300**
 AMOLED over QSPI, **CST9217** touch, **QMI8658** IMU, **PCF85063** RTC, **AXP2101** PMIC,
 **ES8311** audio + speaker, microSD. All pins live in [`src/config.h`](src/config.h), taken from
 the board definition rather than guessed.
