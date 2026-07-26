@@ -616,27 +616,24 @@ static void ac_draw_cb(lv_event_t *e) {
                 draw_offrange(d, ac);
             }
         } else {
-            draw_trail(d, ac, ac.color);
-
-            // Target Phosphor Glow: illuminate target when sweep beam passes over it
+            // Target Phosphor Glow: Calculate opacity based on angular distance to sweep beam
+            lv_opa_t targetOpa = 100; // Baseline dim phosphor opacity (~39%)
             if (s_sweepEnabled) {
                 const float dx = (float)(ac.pos.x - s_cx);
                 const float dy = (float)(ac.pos.y - s_cy);
                 float acDeg = atan2f(dy, dx) * 180.0f / (float)M_PI + 90.0f;
                 if (acDeg < 0.0f) acDeg += 360.0f;
                 float delta = fmodf(s_sweepDeg - acDeg + 360.0f, 360.0f);
-                if (delta < 50.0f) {
-                    float glowFrac = 1.0f - (delta / 50.0f);
-                    lv_draw_arc_dsc_t glow;
-                    lv_draw_arc_dsc_init(&glow);
-                    glow.color = ac.color;
-                    glow.width = (uint16_t)(2 + (uint16_t)(glowFrac * 4.0f));
-                    glow.opa = (lv_opa_t)(glowFrac * glowFrac * 220.0f);
-                    if (glow.opa > 10) {
-                        lv_draw_arc(d, &glow, &ac.pos, 13, 0, 360);
-                    }
+                if (delta < 55.0f) {
+                    float glowFrac = 1.0f - (delta / 55.0f);
+                    // Smooth quadratic decay from 255 (100% full bright glow) down to 100 (39% dim)
+                    targetOpa = (lv_opa_t)(100.0f + 155.0f * (glowFrac * glowFrac));
                 }
+            } else {
+                targetOpa = LV_OPA_COVER;
             }
+
+            draw_trail(d, ac, ac.color);
 
             const float th = ((ac.track != ac.track) ? 0.0f : ac.track) * (float)M_PI / 180.0f;
             const float c = cosf(th), s = sinf(th);
@@ -644,7 +641,7 @@ static void ac_draw_cb(lv_event_t *e) {
             lv_draw_rect_dsc_t g;
             lv_draw_rect_dsc_init(&g);
             g.bg_color = ac.color;
-            g.bg_opa = LV_OPA_COVER;
+            g.bg_opa = targetOpa;
 
             if (s_typeIcons) {
                 const AcShape &sh = AC_SHAPES[ac.cat < AC_CAT_COUNT ? ac.cat : AC_CAT_NARROW];
