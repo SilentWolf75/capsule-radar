@@ -1,7 +1,7 @@
 #pragma once
 // SkyGlass — build & user configuration.
 
-#define FW_VERSION "1.11.17"   // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.11.18"   // shown on the web config page + Stats screen; bump on release
 // ---------- Board selection ----------
 // Everything hardware-specific (screen geometry, pin map, which peripherals exist)
 // lives in src/boards/<board>.h. Pick one with a -D flag in platformio.ini; the
@@ -11,6 +11,14 @@
 #elif defined(BOARD_WAVESHARE_S3_AMOLED_175) || 1
 #  include "boards/waveshare_s3_amoled_175.h"
 #endif
+
+// ---------- UI scaling ----------
+// The UI was laid out by hand against the 466x466 panel, so absolute pixel offsets in
+// ui.cpp are in that design space. UI_S() maps them onto whatever panel is built for.
+// Both operands are compile-time constants, so on the 466 board this folds to the
+// identity at compile time and the original build is bit-for-bit unaffected.
+#define UI_DESIGN_W 466
+#define UI_S(v)     (((int)(v) * SCREEN_W) / UI_DESIGN_W)
 
 // ---------- Home location (default: Dénia, Spain) ----------
 // Overridable at runtime via the captive portal (stored in NVS).

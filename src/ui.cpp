@@ -128,9 +128,24 @@ void ui_format_clock(char *buf, size_t n, int hour, int min, bool withSuffix) {
 // toggle saves to NVS and reboots, so it always takes effect through this path).
 static bool s_bigText = false;
 void ui_set_large_text(bool on) { s_bigText = on; }
-static const lv_font_t *F12() { return s_bigText ? &lv_font_montserrat_16 : &lv_font_montserrat_12; }
-static const lv_font_t *F14() { return s_bigText ? &lv_font_montserrat_18 : &lv_font_montserrat_14; }
-static const lv_font_t *F16() { return s_bigText ? &lv_font_montserrat_20 : &lv_font_montserrat_16; }
+// UI_S() scales positions, but LVGL fonts are fixed sizes and cannot follow it. On a
+// noticeably larger panel the layout would otherwise grow around text that stayed the
+// same size, which reads as sparse and hard to see from a distance. Step the tier up
+// once past a threshold rather than trying to interpolate: the available Montserrat
+// sizes are discrete anyway.
+#define UI_BIG_PANEL (SCREEN_W >= 600)
+static const lv_font_t *F12() {
+    if (UI_BIG_PANEL) return s_bigText ? &lv_font_montserrat_20 : &lv_font_montserrat_18;
+    return s_bigText ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+}
+static const lv_font_t *F14() {
+    if (UI_BIG_PANEL) return &lv_font_montserrat_20;
+    return s_bigText ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+}
+static const lv_font_t *F16() {
+    if (UI_BIG_PANEL) return s_bigText ? &lv_font_montserrat_28 : &lv_font_montserrat_20;
+    return s_bigText ? &lv_font_montserrat_20 : &lv_font_montserrat_16;
+}
 
 static void fmt_alt(char *b, size_t n, float ft, bool gnd) {
     if (gnd)            snprintf(b, n, "GND");
@@ -321,7 +336,7 @@ static void refresh_card(void) {
             char c[52];
             snprintf(c, sizeof(c), "Photo: %s", pcred[0] ? pcred : "planespotters.net");
             lv_label_set_text(s_photoCredit, c);
-            lv_obj_align_to(s_photoCredit, s_photo, LV_ALIGN_OUT_BOTTOM_MID, 0, 1);
+            lv_obj_align_to(s_photoCredit, s_photo, LV_ALIGN_OUT_BOTTOM_MID, UI_S(0), UI_S(1));
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         }
     } else if (s_photo) {
@@ -332,7 +347,7 @@ static void refresh_card(void) {
         if (s_photoCredit) {
             const bool done = in.hex[0] && photo_done(in.hex);
             lv_label_set_text(s_photoCredit, done ? "No photo available" : "Loading photo...");
-            lv_obj_align(s_photoCredit, LV_ALIGN_CENTER, 0, -104);   // where the photo would sit
+            lv_obj_align(s_photoCredit, LV_ALIGN_CENTER, UI_S(0), UI_S(-104));   // where the photo would sit
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -591,7 +606,7 @@ static void build_list(void) {
         if (vn == 0) {
             lv_obj_t *e = lv_label_create(s_list);
             lv_label_set_long_mode(e, LV_LABEL_LONG_WRAP);
-            lv_obj_set_width(e, 320);
+            lv_obj_set_width(e, UI_S(320));
             lv_obj_set_style_text_align(e, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_set_style_text_font(e, F14(), 0);
             lv_obj_set_style_text_color(e, UI_DIM, 0);
@@ -600,7 +615,7 @@ static void build_list(void) {
             lv_label_set_text(e, ais_has_key()
                                      ? "No vessels in range\n\nAIS reception is\ncrowd-sourced from coastal\nreceivers, so inland\nlocations often see nothing."
                                      : "No aisstream.io key\n\nAdd a free key on the\nconfig page to plot\nmarine traffic.");
-            lv_obj_align(e, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_align(e, LV_ALIGN_CENTER, UI_S(0), UI_S(0));
             return;
         }
         for (int i = 0; i < vn; ++i) {
@@ -1307,7 +1322,7 @@ static lv_obj_t *make_tile_title(lv_obj_t *tile, const char *txt) {
     lv_label_set_text(l, txt);
     lv_obj_set_style_text_font(l, F16(), 0);
     lv_obj_set_style_text_color(l, UI_GREEN, 0);
-    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, UI_S(0), UI_S(22));
     return l;
 }
 
@@ -1315,7 +1330,7 @@ static lv_obj_t *make_tile_title(lv_obj_t *tile, const char *txt) {
 static lv_obj_t *make_round_panel(lv_obj_t *parent) {
     lv_obj_t *p = lv_obj_create(parent);
     lv_obj_remove_style_all(p);
-    lv_obj_set_size(p, 462, 462);
+    lv_obj_set_size(p, UI_S(462), UI_S(462));
     lv_obj_center(p);
     lv_obj_set_style_radius(p, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(p, lv_color_hex(0x05100A), 0);
@@ -1348,7 +1363,7 @@ static void build_card(void) {
     s_cardTitle = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardTitle, F16(), 0);
     lv_obj_set_style_text_color(s_cardTitle, UI_INK, 0);
-    lv_obj_align(s_cardTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(s_cardTitle, LV_ALIGN_TOP_LEFT, UI_S(0), UI_S(0));
 
     s_cardL = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardL, F14(), 0);
@@ -1371,13 +1386,13 @@ static void build_card(void) {
     lv_obj_set_style_text_color(s_cardAirline, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_cardAirline, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(s_cardAirline, "");
-    lv_obj_align(s_cardAirline, LV_ALIGN_TOP_RIGHT, 0, 2);
+    lv_obj_align(s_cardAirline, LV_ALIGN_TOP_RIGHT, UI_S(0), UI_S(2));
     lv_obj_add_flag(s_cardAirline, LV_OBJ_FLAG_HIDDEN);
 
     // TRACK toggle: pins this contact to the tracked view (progress bar + ETA)
     s_cardTrackBtn = lv_btn_create(s_card);
-    lv_obj_set_size(s_cardTrackBtn, 84, 26);
-    lv_obj_align(s_cardTrackBtn, LV_ALIGN_BOTTOM_RIGHT, 0, 2);
+    lv_obj_set_size(s_cardTrackBtn, UI_S(84), UI_S(26));
+    lv_obj_align(s_cardTrackBtn, LV_ALIGN_BOTTOM_RIGHT, UI_S(0), UI_S(2));
     lv_obj_set_style_radius(s_cardTrackBtn, 13, 0);
     lv_obj_set_style_bg_color(s_cardTrackBtn, UI_PANEL, 0);
     lv_obj_set_style_border_color(s_cardTrackBtn, UI_GREEN, 0);
@@ -1408,8 +1423,8 @@ static void build_card(void) {
     // --- AIS vessel card (compact; shares the aircraft card's slot) ---
     s_vesselCard = lv_obj_create(s_tileRadar);
     lv_obj_remove_style_all(s_vesselCard);
-    lv_obj_set_size(s_vesselCard, 300, 96);
-    lv_obj_align(s_vesselCard, LV_ALIGN_CENTER, 0, 76);
+    lv_obj_set_size(s_vesselCard, UI_S(300), UI_S(96));
+    lv_obj_align(s_vesselCard, LV_ALIGN_CENTER, UI_S(0), UI_S(76));
     lv_obj_set_style_bg_color(s_vesselCard, UI_PANEL, 0);
     lv_obj_set_style_bg_opa(s_vesselCard, 235, 0);
     lv_obj_set_style_radius(s_vesselCard, 14, 0);
@@ -1425,13 +1440,13 @@ static void build_card(void) {
     lv_obj_set_style_text_font(s_vesselTitle, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_vesselTitle, lv_color_hex(0x9BE9FF), 0);
     lv_label_set_text(s_vesselTitle, "");
-    lv_obj_align(s_vesselTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(s_vesselTitle, LV_ALIGN_TOP_LEFT, UI_S(0), UI_S(0));
 
     s_vesselBody = lv_label_create(s_vesselCard);
     lv_obj_set_style_text_font(s_vesselBody, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_vesselBody, UI_SOFT, 0);
     lv_label_set_text(s_vesselBody, "");
-    lv_obj_align(s_vesselBody, LV_ALIGN_TOP_LEFT, 0, 24);
+    lv_obj_align(s_vesselBody, LV_ALIGN_TOP_LEFT, UI_S(0), UI_S(24));
 }
 
 void ui_show_view(int idx) {
@@ -1674,8 +1689,8 @@ void ui_splash_show(void) {
     // Title, with a dark plate behind it so it stays legible over the horizon glow.
     lv_obj_t *plate = lv_obj_create(cont);
     lv_obj_remove_style_all(plate);
-    lv_obj_set_size(plate, 306, 112);
-    lv_obj_align(plate, LV_ALIGN_CENTER, 0, 132);
+    lv_obj_set_size(plate, UI_S(306), UI_S(112));
+    lv_obj_align(plate, LV_ALIGN_CENTER, UI_S(0), UI_S(132));
     lv_obj_set_style_radius(plate, 18, 0);
     lv_obj_set_style_bg_color(plate, lv_color_hex(0x02070F), 0);
     lv_obj_set_style_bg_opa(plate, 180, 0);
@@ -1689,14 +1704,14 @@ void ui_splash_show(void) {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0xEAF8FF), 0);
     lv_obj_set_style_text_letter_space(title, 4, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 122);
+    lv_obj_align(title, LV_ALIGN_CENTER, UI_S(0), UI_S(122));
 
     lv_obj_t *sub = lv_label_create(cont);
     lv_label_set_text(sub, "LIVE AIRSPACE MONITOR");
     lv_obj_set_style_text_font(sub, F12(), 0);
     lv_obj_set_style_text_color(sub, lv_color_hex(0x63D8FF), 0);
     lv_obj_set_style_text_letter_space(sub, 2, 0);
-    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 152);
+    lv_obj_align(sub, LV_ALIGN_CENTER, UI_S(0), UI_S(152));
 
     // On the plate, not the bezel: at the bottom of the screen this sat on the horizon
     // glow and was effectively invisible.
@@ -1704,7 +1719,7 @@ void ui_splash_show(void) {
     lv_label_set_text(ver, "v" FW_VERSION);
     lv_obj_set_style_text_font(ver, F12(), 0);
     lv_obj_set_style_text_color(ver, lv_color_hex(0xBFD8E8), 0);
-    lv_obj_align(ver, LV_ALIGN_CENTER, 0, 176);
+    lv_obj_align(ver, LV_ALIGN_CENTER, UI_S(0), UI_S(176));
 
     // Hold splash screen visible for 6.0 seconds minimum before fading
     lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 6000, cont);
@@ -1746,9 +1761,9 @@ void ui_create(void) {
 
     // on-screen range/zoom button (reliable single tap; bottom, above the 'S' marker)
     s_zoomBtn = lv_btn_create(s_tileRadar);
-    lv_obj_set_size(s_zoomBtn, 120, 44);
+    lv_obj_set_size(s_zoomBtn, UI_S(120), UI_S(44));
     lv_obj_set_ext_click_area(s_zoomBtn, 18);   // invisibly enlarge the tap target (easier to hit)
-    lv_obj_align(s_zoomBtn, LV_ALIGN_BOTTOM_MID, 0, -32);
+    lv_obj_align(s_zoomBtn, LV_ALIGN_BOTTOM_MID, UI_S(0), UI_S(-32));
     lv_obj_set_style_radius(s_zoomBtn, 18, 0);
     lv_obj_set_style_bg_color(s_zoomBtn, UI_PANEL, 0);
     lv_obj_set_style_bg_opa(s_zoomBtn, 225, 0);
@@ -1767,8 +1782,8 @@ void ui_create(void) {
     // WiFi is a 4-bar signal meter: bar count = RSSI strength, colour = feed health.
     s_hudWifi = lv_obj_create(s_tileRadar);
     lv_obj_remove_style_all(s_hudWifi);
-    lv_obj_set_size(s_hudWifi, 21, 14);
-    lv_obj_align(s_hudWifi, LV_ALIGN_TOP_MID, -94, 50);
+    lv_obj_set_size(s_hudWifi, UI_S(21), UI_S(14));
+    lv_obj_align(s_hudWifi, LV_ALIGN_TOP_MID, UI_S(-94), UI_S(50));
     lv_obj_clear_flag(s_hudWifi, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     for (int i = 0; i < 4; ++i) {
         s_hudBars[i] = lv_obj_create(s_hudWifi);
@@ -1785,39 +1800,39 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_hudGps, F14(), 0);
     lv_obj_set_style_text_color(s_hudGps, UI_GREEN, 0);
     lv_label_set_text(s_hudGps, "");             // hidden until ui_set_gps() says GPS is on
-    lv_obj_align(s_hudGps, LV_ALIGN_TOP_MID, -62, 50);
+    lv_obj_align(s_hudGps, LV_ALIGN_TOP_MID, UI_S(-62), UI_S(50));
 
     s_hudCount = lv_label_create(s_tileRadar);
     lv_obj_set_style_text_font(s_hudCount, F14(), 0);
     lv_obj_set_style_text_color(s_hudCount, UI_INK, 0);
     lv_label_set_text(s_hudCount, "0");
-    lv_obj_align(s_hudCount, LV_ALIGN_TOP_MID, -34, 50);
+    lv_obj_align(s_hudCount, LV_ALIGN_TOP_MID, UI_S(-34), UI_S(50));
 
     s_hudClock = lv_label_create(s_tileRadar);
     lv_obj_set_style_text_font(s_hudClock, F14(), 0);
     lv_obj_set_style_text_color(s_hudClock, UI_INK, 0);
     lv_label_set_text(s_hudClock, "--:--");
-    lv_obj_align(s_hudClock, LV_ALIGN_TOP_MID, 30, 50);
+    lv_obj_align(s_hudClock, LV_ALIGN_TOP_MID, UI_S(30), UI_S(50));
 
     s_hudBatt = lv_label_create(s_tileRadar);
     lv_obj_set_style_text_font(s_hudBatt, F14(), 0);
     lv_obj_set_style_text_color(s_hudBatt, UI_INK, 0);
     lv_label_set_text(s_hudBatt, "");
-    lv_obj_align(s_hudBatt, LV_ALIGN_TOP_MID, 92, 50);
+    lv_obj_align(s_hudBatt, LV_ALIGN_TOP_MID, UI_S(92), UI_S(50));
 
     s_hudDate = lv_label_create(s_tileRadar);
     lv_obj_set_style_text_font(s_hudDate, F12(), 0);
     lv_obj_set_style_text_color(s_hudDate, UI_INK, 0);
     lv_obj_set_style_text_opa(s_hudDate, 140, 0);
     lv_label_set_text(s_hudDate, "");
-    lv_obj_align(s_hudDate, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_align(s_hudDate, LV_ALIGN_TOP_MID, UI_S(0), UI_S(70));
 
     // --- list tile (circular panel, clipped to the round screen) ---
     lv_obj_t *lp = make_round_panel(s_tileList);
     s_listTitle = make_tile_title(lp, "AIRCRAFT");
     s_list = lv_list_create(lp);
     lv_obj_set_size(s_list, s_bigText ? 340 : 300, 372);   // wider rows so big-font distances don't clip
-    lv_obj_align(s_list, LV_ALIGN_CENTER, 0, 22);
+    lv_obj_align(s_list, LV_ALIGN_CENTER, UI_S(0), UI_S(22));
     lv_obj_set_style_bg_opa(s_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_list, 0, 0);
     lv_obj_set_style_pad_row(s_list, 2, 0);
@@ -1829,29 +1844,29 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_statsLbl, F16(), 0);
     lv_obj_set_style_text_color(s_statsLbl, UI_SOFT, 0);
     lv_label_set_text(s_statsLbl, "Aircraft   0");
-    lv_obj_align(s_statsLbl, LV_ALIGN_CENTER, 0, -16);
+    lv_obj_align(s_statsLbl, LV_ALIGN_CENTER, UI_S(0), UI_S(-16));
 
     s_statsGps = lv_label_create(sp);               // GPS status line (hidden unless GPS is on)
     lv_obj_set_style_text_font(s_statsGps, F14(), 0);
     lv_obj_set_style_text_color(s_statsGps, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_statsGps, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_statsGps, "");
-    lv_obj_align(s_statsGps, LV_ALIGN_CENTER, 0, 90);
+    lv_obj_align(s_statsGps, LV_ALIGN_CENTER, UI_S(0), UI_S(90));
 
     // footer: where to reach the configuration page (IP / hostname / setup AP)
     s_statsNet = lv_label_create(sp);
-    lv_obj_set_width(s_statsNet, 320);
+    lv_obj_set_width(s_statsNet, UI_S(320));
     lv_obj_set_style_text_font(s_statsNet, F14(), 0);
     lv_obj_set_style_text_color(s_statsNet, UI_GREEN, 0);
     lv_obj_set_style_text_align(s_statsNet, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_statsNet, "");
-    lv_obj_align(s_statsNet, LV_ALIGN_CENTER, 0, 132);
+    lv_obj_align(s_statsNet, LV_ALIGN_CENTER, UI_S(0), UI_S(132));
 
     lv_obj_t *ver = lv_label_create(sp);            // firmware version (so users can tell what's flashed)
     lv_obj_set_style_text_font(ver, F12(), 0);
     lv_obj_set_style_text_color(ver, UI_DIM, 0);
     lv_label_set_text(ver, "SkyGlass v" FW_VERSION);
-    lv_obj_align(ver, LV_ALIGN_CENTER, 0, 170);
+    lv_obj_align(ver, LV_ALIGN_CENTER, UI_S(0), UI_S(170));
 
     // --- weather tile (current conditions + next three days) ---
     lv_obj_t *wp = make_round_panel(s_tileWeather);
@@ -1865,28 +1880,28 @@ void ui_create(void) {
     lv_obj_set_style_pad_bottom(s_weatherTitle, 2, 0);
     lv_obj_set_style_radius(s_weatherTitle, 8, 0);
     s_weatherNow = lv_label_create(wp);
-    lv_obj_set_width(s_weatherNow, 330);
+    lv_obj_set_width(s_weatherNow, UI_S(330));
     lv_obj_set_style_text_font(s_weatherNow, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_weatherNow, UI_INK, 0);
     lv_obj_set_style_text_align(s_weatherNow, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_weatherNow, "Forecast unavailable");
-    lv_obj_align(s_weatherNow, LV_ALIGN_TOP_MID, 0, 64);
+    lv_obj_align(s_weatherNow, LV_ALIGN_TOP_MID, UI_S(0), UI_S(64));
 
     s_weatherMeta = lv_label_create(wp);
-    lv_obj_set_width(s_weatherMeta, 380);
+    lv_obj_set_width(s_weatherMeta, UI_S(380));
     lv_obj_set_style_text_font(s_weatherMeta, F14(), 0);
     lv_obj_set_style_text_color(s_weatherMeta, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_weatherMeta, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_weatherMeta, "Waiting for WiFi data...");
-    lv_obj_align(s_weatherMeta, LV_ALIGN_TOP_MID, 0, 150);
+    lv_obj_align(s_weatherMeta, LV_ALIGN_TOP_MID, UI_S(0), UI_S(150));
 
     s_weatherDays = lv_label_create(wp);
-    lv_obj_set_width(s_weatherDays, 390);
+    lv_obj_set_width(s_weatherDays, UI_S(390));
     lv_obj_set_style_text_font(s_weatherDays, F16(), 0);
     lv_obj_set_style_text_color(s_weatherDays, UI_GREEN, 0);
     lv_obj_set_style_text_align(s_weatherDays, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_text(s_weatherDays, "");
-    lv_obj_align(s_weatherDays, LV_ALIGN_TOP_LEFT, 42, 234);
+    lv_obj_align(s_weatherDays, LV_ALIGN_TOP_LEFT, UI_S(42), UI_S(234));
     // Legacy formatted labels are retained only to avoid touching older data-update
     // plumbing; the redesigned forecast uses independent aligned objects below.
     lv_obj_add_flag(s_weatherNow, LV_OBJ_FLAG_HIDDEN);
@@ -1903,11 +1918,11 @@ void ui_create(void) {
     lv_obj_set_style_pad_right(s_wxAirport, 6, 0);
     lv_obj_set_style_radius(s_wxAirport, 6, 0);
     lv_label_set_text(s_wxAirport, "RADAR CENTRE");
-    lv_obj_align(s_wxAirport, LV_ALIGN_TOP_MID, 0, 46);
+    lv_obj_align(s_wxAirport, LV_ALIGN_TOP_MID, UI_S(0), UI_S(46));
 
     s_wxCanvas = lv_canvas_create(wp);
     lv_obj_set_size(s_wxCanvas, WX_RADAR_SIZE, WX_RADAR_SIZE);
-    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, UI_S(0), UI_S(52));
     lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_wxCanvas, weather_mode_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
@@ -1917,7 +1932,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxStatus, F14(), 0);
     lv_obj_set_style_text_color(s_wxStatus, UI_DIM, 0);
     lv_label_set_text(s_wxStatus, "ACQUIRING WX RADAR...");
-    lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, 0, 222);
+    lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, UI_S(0), UI_S(222));
 
     const int ringSize[3] = { 360, 240, 120 };
     for (int i = 0; i < 3; ++i) {
@@ -1935,36 +1950,36 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxNorth, F12(), 0);
     lv_obj_set_style_text_color(s_wxNorth, UI_GREEN, 0);
     lv_label_set_text(s_wxNorth, "N");
-    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, UI_S(0), UI_S(58));
     s_wxCenter = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxCenter, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_wxCenter, UI_INK, 0);
     lv_label_set_text(s_wxCenter, "+");
-    lv_obj_align(s_wxCenter, LV_ALIGN_TOP_MID, 0, 219);
+    lv_obj_align(s_wxCenter, LV_ALIGN_TOP_MID, UI_S(0), UI_S(219));
     s_wxRange = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxRange, F12(), 0);
     lv_obj_set_style_text_color(s_wxRange, UI_GREEN, 0);
     lv_label_set_text(s_wxRange, "");            // filled by build_weather() in the chosen unit
-    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, 128, 225);
+    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, UI_S(128), UI_S(225));
 
     s_wxFooter = lv_label_create(wp);
-    lv_obj_set_width(s_wxFooter, 360);
+    lv_obj_set_width(s_wxFooter, UI_S(360));
     lv_obj_set_style_text_font(s_wxFooter, F16(), 0);
     lv_obj_set_style_text_color(s_wxFooter, UI_INK, 0);
     lv_obj_set_style_text_align(s_wxFooter, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_wxFooter, "WEATHER DATA PENDING");
-    lv_obj_align(s_wxFooter, LV_ALIGN_TOP_MID, 0, 326);
+    lv_obj_align(s_wxFooter, LV_ALIGN_TOP_MID, UI_S(0), UI_S(326));
     lv_obj_set_style_bg_color(s_wxFooter, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wxFooter, 185, 0);
     lv_obj_set_style_pad_hor(s_wxFooter, 8, 0);
     lv_obj_set_style_radius(s_wxFooter, 7, 0);
     s_wxMeta = lv_label_create(wp);
-    lv_obj_set_width(s_wxMeta, 360);
+    lv_obj_set_width(s_wxMeta, UI_S(360));
     lv_obj_set_style_text_font(s_wxMeta, F14(), 0);
     lv_obj_set_style_text_color(s_wxMeta, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_wxMeta, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_wxMeta, "");
-    lv_obj_align(s_wxMeta, LV_ALIGN_TOP_MID, 0, 351);
+    lv_obj_align(s_wxMeta, LV_ALIGN_TOP_MID, UI_S(0), UI_S(351));
     lv_obj_set_style_bg_color(s_wxMeta, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wxMeta, 185, 0);
     lv_obj_set_style_pad_hor(s_wxMeta, 8, 0);
@@ -1973,7 +1988,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxAttrib, F12(), 0);
     lv_obj_set_style_text_color(s_wxAttrib, UI_DIM, 0);
     lv_label_set_text(s_wxAttrib, "WAITING FOR RADAR DATA");
-    lv_obj_align(s_wxAttrib, LV_ALIGN_TOP_MID, 0, 376);
+    lv_obj_align(s_wxAttrib, LV_ALIGN_TOP_MID, UI_S(0), UI_S(376));
     lv_obj_set_style_bg_color(s_wxAttrib, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wxAttrib, 170, 0);
     lv_obj_set_style_pad_hor(s_wxAttrib, 6, 0);
@@ -1982,19 +1997,19 @@ void ui_create(void) {
     // Forecast mode: independent, aligned objects instead of a tiny text table.
     s_fcIcon = lv_obj_create(wp);                 // current conditions, beside the temperature
     weather_icon_attach(s_fcIcon);
-    lv_obj_set_size(s_fcIcon, 58, 58);
-    lv_obj_align(s_fcIcon, LV_ALIGN_TOP_MID, -78, 62);
+    lv_obj_set_size(s_fcIcon, UI_S(58), UI_S(58));
+    lv_obj_align(s_fcIcon, LV_ALIGN_TOP_MID, UI_S(-78), UI_S(62));
 
     s_fcCurrent = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCurrent, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_fcCurrent, UI_INK, 0);
     lv_label_set_text(s_fcCurrent, "-- C");
-    lv_obj_align(s_fcCurrent, LV_ALIGN_TOP_MID, 22, 68);
+    lv_obj_align(s_fcCurrent, LV_ALIGN_TOP_MID, UI_S(22), UI_S(68));
     s_fcCondition = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCondition, F16(), 0);
     lv_obj_set_style_text_color(s_fcCondition, UI_SOFT, 0);
     lv_label_set_text(s_fcCondition, "Waiting for data");
-    lv_obj_align(s_fcCondition, LV_ALIGN_TOP_MID, 0, 105);
+    lv_obj_align(s_fcCondition, LV_ALIGN_TOP_MID, UI_S(0), UI_S(105));
 
     const char *metricNames[3] = { "FEELS", "HUMIDITY", "WIND" };
     const int colX[3] = { -122, 0, 122 };
@@ -2018,10 +2033,10 @@ void ui_create(void) {
 
         s_fcDayIcon[i] = lv_obj_create(wp);
         weather_icon_attach(s_fcDayIcon[i]);
-        lv_obj_set_size(s_fcDayIcon[i], 44, 44);
+        lv_obj_set_size(s_fcDayIcon[i], UI_S(44), UI_S(44));
         lv_obj_align(s_fcDayIcon[i], LV_ALIGN_TOP_MID, colX[i], 230);
         s_fcDayCondition[i] = lv_label_create(wp);
-        lv_obj_set_width(s_fcDayCondition[i], 116);
+        lv_obj_set_width(s_fcDayCondition[i], UI_S(116));
         lv_obj_set_style_text_font(s_fcDayCondition[i], F12(), 0);
         lv_obj_set_style_text_color(s_fcDayCondition[i], UI_SOFT, 0);
         lv_obj_set_style_text_align(s_fcDayCondition[i], LV_TEXT_ALIGN_CENTER, 0);
@@ -2043,11 +2058,11 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_fcUpdated, F12(), 0);
     lv_obj_set_style_text_color(s_fcUpdated, UI_DIM, 0);
     lv_label_set_text(s_fcUpdated, "");
-    lv_obj_align(s_fcUpdated, LV_ALIGN_TOP_MID, 0, 365);
+    lv_obj_align(s_fcUpdated, LV_ALIGN_TOP_MID, UI_S(0), UI_S(365));
 
     s_weatherModeBtn = lv_btn_create(wp);
-    lv_obj_set_size(s_weatherModeBtn, 164, 34);
-    lv_obj_align(s_weatherModeBtn, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_set_size(s_weatherModeBtn, UI_S(164), UI_S(34));
+    lv_obj_align(s_weatherModeBtn, LV_ALIGN_BOTTOM_MID, UI_S(0), UI_S(-18));
     lv_obj_set_style_radius(s_weatherModeBtn, 17, 0);
     lv_obj_set_style_bg_color(s_weatherModeBtn, UI_PANEL, 0);
     lv_obj_set_style_border_color(s_weatherModeBtn, UI_GREEN, 0);
@@ -2065,24 +2080,24 @@ void ui_create(void) {
     make_tile_title(tp, "TRACKED");
 
     s_trkTitle = lv_label_create(tp);
-    lv_obj_set_width(s_trkTitle, 330);
+    lv_obj_set_width(s_trkTitle, UI_S(330));
     lv_obj_set_style_text_font(s_trkTitle, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_trkTitle, UI_INK, 0);
     lv_obj_set_style_text_align(s_trkTitle, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_trkTitle, "No flight tracked");
-    lv_obj_align(s_trkTitle, LV_ALIGN_TOP_MID, 0, 74);
+    lv_obj_align(s_trkTitle, LV_ALIGN_TOP_MID, UI_S(0), UI_S(74));
 
     s_trkRoute = lv_label_create(tp);
-    lv_obj_set_width(s_trkRoute, 350);
+    lv_obj_set_width(s_trkRoute, UI_S(350));
     lv_obj_set_style_text_font(s_trkRoute, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_trkRoute, UI_GREEN, 0);
     lv_obj_set_style_text_align(s_trkRoute, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_trkRoute, "");
-    lv_obj_align(s_trkRoute, LV_ALIGN_TOP_MID, 0, 116);
+    lv_obj_align(s_trkRoute, LV_ALIGN_TOP_MID, UI_S(0), UI_S(116));
 
     s_trkBar = lv_bar_create(tp);
-    lv_obj_set_size(s_trkBar, 300, 10);
-    lv_obj_align(s_trkBar, LV_ALIGN_CENTER, 0, -6);
+    lv_obj_set_size(s_trkBar, UI_S(300), UI_S(10));
+    lv_obj_align(s_trkBar, LV_ALIGN_CENTER, UI_S(0), UI_S(-6));
     lv_obj_set_style_radius(s_trkBar, 5, 0);
     lv_obj_set_style_bg_color(s_trkBar, lv_color_hex(0x14301F), LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_trkBar, UI_GREEN, LV_PART_INDICATOR);
@@ -2094,44 +2109,44 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_trkFrom, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_trkFrom, UI_SOFT, 0);
     lv_label_set_text(s_trkFrom, "");
-    lv_obj_align(s_trkFrom, LV_ALIGN_CENTER, -150, 12);
+    lv_obj_align(s_trkFrom, LV_ALIGN_CENTER, UI_S(-150), UI_S(12));
 
     s_trkTo = lv_label_create(tp);
     lv_obj_set_style_text_font(s_trkTo, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_trkTo, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_trkTo, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(s_trkTo, "");
-    lv_obj_align(s_trkTo, LV_ALIGN_CENTER, 150, 12);
+    lv_obj_align(s_trkTo, LV_ALIGN_CENTER, UI_S(150), UI_S(12));
 
     s_trkPct = lv_label_create(tp);
     lv_obj_set_style_text_font(s_trkPct, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_trkPct, UI_INK, 0);
     lv_label_set_text(s_trkPct, "");
-    lv_obj_align(s_trkPct, LV_ALIGN_CENTER, 0, 12);
+    lv_obj_align(s_trkPct, LV_ALIGN_CENTER, UI_S(0), UI_S(12));
 
     s_trkEta = lv_label_create(tp);
-    lv_obj_set_width(s_trkEta, 340);
+    lv_obj_set_width(s_trkEta, UI_S(340));
     lv_obj_set_style_text_font(s_trkEta, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_trkEta, UI_INK, 0);
     lv_obj_set_style_text_align(s_trkEta, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_trkEta, "");
-    lv_obj_align(s_trkEta, LV_ALIGN_CENTER, 0, 44);
+    lv_obj_align(s_trkEta, LV_ALIGN_CENTER, UI_S(0), UI_S(44));
 
     s_trkStats = lv_label_create(tp);
-    lv_obj_set_width(s_trkStats, 340);
+    lv_obj_set_width(s_trkStats, UI_S(340));
     lv_obj_set_style_text_font(s_trkStats, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_trkStats, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_trkStats, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_trkStats, "");
-    lv_obj_align(s_trkStats, LV_ALIGN_CENTER, 0, 84);
+    lv_obj_align(s_trkStats, LV_ALIGN_CENTER, UI_S(0), UI_S(84));
 
     s_trkHint = lv_label_create(tp);
-    lv_obj_set_width(s_trkHint, 320);
+    lv_obj_set_width(s_trkHint, UI_S(320));
     lv_obj_set_style_text_font(s_trkHint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_trkHint, UI_DIM, 0);
     lv_obj_set_style_text_align(s_trkHint, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_trkHint, "Tap an aircraft on the radar,\nthen press TRACK on its card.");
-    lv_obj_align(s_trkHint, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(s_trkHint, LV_ALIGN_CENTER, UI_S(0), UI_S(20));
 
     // --- clock tile (watch face + current weather + 3-day strip) ---
     // Laid out as a watch face rather than a column of text: a seconds arc at the rim
@@ -2142,7 +2157,7 @@ void ui_create(void) {
 
     s_clockRing = lv_obj_create(cp);                      // static outer ring, radar-like
     lv_obj_remove_style_all(s_clockRing);
-    lv_obj_set_size(s_clockRing, 442, 442);
+    lv_obj_set_size(s_clockRing, UI_S(442), UI_S(442));
     lv_obj_center(s_clockRing);
     lv_obj_set_style_radius(s_clockRing, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_color(s_clockRing, UI_GREEN, 0);
@@ -2151,7 +2166,7 @@ void ui_create(void) {
     lv_obj_clear_flag(s_clockRing, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     s_clockArc = lv_arc_create(cp);                       // seconds, sweeping the rim
-    lv_obj_set_size(s_clockArc, 424, 424);
+    lv_obj_set_size(s_clockArc, UI_S(424), UI_S(424));
     lv_obj_center(s_clockArc);
     lv_arc_set_rotation(s_clockArc, 270);                 // start at 12 o'clock
     lv_arc_set_bg_angles(s_clockArc, 0, 360);
@@ -2170,45 +2185,45 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_clockTime, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_clockTime, UI_INK, 0);
     lv_label_set_text(s_clockTime, "--:--");
-    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, -14, -74);
+    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, UI_S(-14), UI_S(-74));
 
     s_clockSec = lv_label_create(cp);                     // meridiem only; seconds are the arc
     lv_obj_set_style_text_font(s_clockSec, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_clockSec, UI_GREEN, 0);
     lv_label_set_text(s_clockSec, "");
-    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, 84, -62);
+    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, UI_S(84), UI_S(-62));
 
     s_clockDate = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockDate, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_clockDate, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_clockDate, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_clockDate, "");
-    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, 0, -34);
+    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, UI_S(0), UI_S(-34));
 
     s_clockRule = lv_obj_create(cp);                      // hairline between time and weather
     lv_obj_remove_style_all(s_clockRule);
-    lv_obj_set_size(s_clockRule, 150, 1);
-    lv_obj_align(s_clockRule, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_set_size(s_clockRule, UI_S(150), UI_S(1));
+    lv_obj_align(s_clockRule, LV_ALIGN_CENTER, UI_S(0), UI_S(-8));
     lv_obj_set_style_bg_color(s_clockRule, UI_GREEN, 0);
     lv_obj_set_style_bg_opa(s_clockRule, 70, 0);
     lv_obj_clear_flag(s_clockRule, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     s_clockIcon = lv_obj_create(cp);                      // current conditions, left of the temp
     weather_icon_attach(s_clockIcon);
-    lv_obj_set_size(s_clockIcon, 54, 54);
-    lv_obj_align(s_clockIcon, LV_ALIGN_CENTER, -66, 30);
+    lv_obj_set_size(s_clockIcon, UI_S(54), UI_S(54));
+    lv_obj_align(s_clockIcon, LV_ALIGN_CENTER, UI_S(-66), UI_S(30));
 
     s_clockTemp = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockTemp, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_clockTemp, UI_INK, 0);
     lv_label_set_text(s_clockTemp, "");
-    lv_obj_align(s_clockTemp, LV_ALIGN_CENTER, 24, 20);
+    lv_obj_align(s_clockTemp, LV_ALIGN_CENTER, UI_S(24), UI_S(20));
 
     s_clockCond = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockCond, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_clockCond, UI_SOFT, 0);
     lv_label_set_text(s_clockCond, "");
-    lv_obj_align(s_clockCond, LV_ALIGN_CENTER, 24, 46);
+    lv_obj_align(s_clockCond, LV_ALIGN_CENTER, UI_S(24), UI_S(46));
 
     const int clkColX[3] = { -104, 0, 104 };
     for (int i = 0; i < 3; ++i) {
@@ -2219,7 +2234,7 @@ void ui_create(void) {
         lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], 90);
         s_clockDayIcon[i] = lv_obj_create(cp);
         weather_icon_attach(s_clockDayIcon[i]);
-        lv_obj_set_size(s_clockDayIcon[i], 38, 38);
+        lv_obj_set_size(s_clockDayIcon[i], UI_S(38), UI_S(38));
         lv_obj_align(s_clockDayIcon[i], LV_ALIGN_CENTER, clkColX[i], 119);
         s_clockDayTemp[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDayTemp[i], &lv_font_montserrat_14, 0);
@@ -2244,7 +2259,7 @@ void ui_create(void) {
     lv_obj_set_style_pad_top(s_fireBadge, 2, 0);
     lv_obj_set_style_pad_bottom(s_fireBadge, 2, 0);
     lv_obj_set_style_radius(s_fireBadge, 10, 0);
-    lv_obj_align(s_fireBadge, LV_ALIGN_TOP_MID, 0, 48);
+    lv_obj_align(s_fireBadge, LV_ALIGN_TOP_MID, UI_S(0), UI_S(48));
     lv_label_set_text(s_fireBadge, "MODIS OVERVIEW");
 
     s_fireLayer = lv_obj_create(fp);
@@ -2257,16 +2272,16 @@ void ui_create(void) {
     lv_obj_add_event_cb(s_fireLayer, fire_tap_cb, LV_EVENT_CLICKED, nullptr);
 
     s_fireInfo = lv_label_create(fp);
-    lv_obj_set_width(s_fireInfo, 380);
+    lv_obj_set_width(s_fireInfo, UI_S(380));
     lv_obj_set_style_text_font(s_fireInfo, F14(), 0);
     lv_obj_set_style_text_color(s_fireInfo, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_fireInfo, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_fireInfo, "waiting for data...");
-    lv_obj_align(s_fireInfo, LV_ALIGN_BOTTOM_MID, 0, -54);
+    lv_obj_align(s_fireInfo, LV_ALIGN_BOTTOM_MID, UI_S(0), UI_S(-54));
 
     s_fireBack = lv_btn_create(fp);
-    lv_obj_set_size(s_fireBack, 130, 34);
-    lv_obj_align(s_fireBack, LV_ALIGN_BOTTOM_MID, 0, -16);
+    lv_obj_set_size(s_fireBack, UI_S(130), UI_S(34));
+    lv_obj_align(s_fireBack, LV_ALIGN_BOTTOM_MID, UI_S(0), UI_S(-16));
     lv_obj_set_style_radius(s_fireBack, 17, 0);
     lv_obj_set_style_bg_color(s_fireBack, UI_PANEL, 0);
     lv_obj_set_style_border_color(s_fireBack, UI_GREEN, 0);
@@ -2284,25 +2299,25 @@ void ui_create(void) {
     lv_obj_set_style_text_font(aName, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(aName, UI_INK, 0);
     lv_obj_set_style_text_letter_space(aName, 3, 0);
-    lv_obj_align(aName, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_align(aName, LV_ALIGN_TOP_MID, UI_S(0), UI_S(54));
 
     lv_obj_t *aVer = lv_label_create(ap);
     lv_label_set_text(aVer, "v" FW_VERSION);
     lv_obj_set_style_text_font(aVer, F14(), 0);
     lv_obj_set_style_text_color(aVer, UI_CYAN, 0);
-    lv_obj_align(aVer, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_align(aVer, LV_ALIGN_TOP_MID, UI_S(0), UI_S(90));
 
     // Recolour mode so the field labels can be dimmer than their values in one label.
     s_aboutBody = lv_label_create(ap);
     lv_label_set_recolor(s_aboutBody, true);
-    lv_obj_set_width(s_aboutBody, 360);
+    lv_obj_set_width(s_aboutBody, UI_S(360));
     lv_obj_set_style_text_font(s_aboutBody, F12(), 0);
     lv_obj_set_style_text_color(s_aboutBody, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_aboutBody, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(s_aboutBody, 2, 0);
     // Kept high enough that the last line clears the round bezel: at this width the
     // usable half-chord shrinks fast below y=370.
-    lv_obj_align(s_aboutBody, LV_ALIGN_CENTER, 0, 14);
+    lv_obj_align(s_aboutBody, LV_ALIGN_CENTER, UI_S(0), UI_S(14));
     build_about();
     lv_obj_t *bl = lv_label_create(s_fireBack);
     lv_obj_set_style_text_font(bl, F12(), 0);

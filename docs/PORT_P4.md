@@ -69,9 +69,11 @@ existing proof of portability:
 4. **Peripheral fallbacks.** No IMU, RTC or PMIC. Face-down sleep, the pre-WiFi clock and
    battery reporting must degrade gracefully rather than be assumed present — hence the
    `BOARD_HAS_*` flags.
-5. **UI layout pass.** Geometry is now parameterised, but many alignment offsets in
-   `ui.cpp` are absolute pixels tuned for 466×466. They will render small and
-   off-balance at 720×720 until they are proportional.
+5. ~~**UI layout pass.**~~ **Done** — 96 absolute placements in `ui.cpp` now go through
+   `UI_S()`, which maps the 466-wide design space onto the built panel. Fonts cannot
+   follow a scale factor (LVGL sizes are discrete), so `UI_BIG_PANEL` steps the tier up
+   past 600 px wide. Still worth an eye over it on the real panel: proportional scaling
+   gets the geometry right, not necessarily the balance.
 
 ## The vendor demo is published — use it
 
