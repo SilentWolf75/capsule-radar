@@ -148,8 +148,9 @@ project rule, unconfirmed pins stay `-1` and the build fails rather than guessin
 
 1. ~~Capture the vendor init sequence and timings.~~ **Done** — extracted from the
    published demo zip, no hardware needed. See `src/boards/p4_panel_init.h`.
-2. Confirm the one remaining [COMMUNITY] value, the backlight pin (GPIO26), against the
-   vendor demo or the schematic PDF.
+2. ~~Confirm the backlight pin.~~ **Done** — `ESP-IDF/06_displaypanel_3.4inch` in the
+   same demo confirms GPIO26, and cross-confirms `lcd_rst = 27`, 2 DSI lanes, and the
+   PHY LDO on channel 3 at 2500 mV. Every panel and touch value is now [VENDOR].
 3. Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:` on serial. The init
    sequence and timings are already in place from the vendor demo, so this may simply
    work; if it does not, re-extract rather than tweak.

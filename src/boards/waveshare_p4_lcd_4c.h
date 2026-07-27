@@ -40,10 +40,10 @@
 #define PIN_I2C_SCL         8
 
 // ---------- Panel / touch ----------
-// MIPI-DSI needs no databus GPIOs (the PHY is dedicated). Panel reset, touch reset and
-// the touch address are now [VENDOR]; the backlight pin is still only [COMMUNITY].
+// MIPI-DSI needs no databus GPIOs (the PHY is dedicated). All of these are [VENDOR],
+// cross-confirmed between displays_config.h and the ESP-IDF panel test in the demo.
 #define PIN_LCD_RST         27             // [VENDOR] displays_config.h .lcd_rst
-#define PIN_LCD_BL          26             // [COMMUNITY] LEDC PWM backlight
+#define PIN_LCD_BL          26             // [VENDOR] TEST_PIN_NUM_BK_LIGHT
 #define PIN_TP_INT          -1             // [VENDOR] GPIO_NUM_NC - not connected
 #define PIN_TP_RST          23             // [VENDOR] gt911.h EXAMPLE_PIN_NUM_TOUCH_RST
 #define TP_MIRROR_X         false          // unverified: confirm against the touch demo
@@ -67,6 +67,7 @@
 #define DSI_VSYNC_BACK      12
 // The DSI PHY is powered from an internal LDO that must be switched on explicitly.
 // Forgetting it is the classic "everything logs fine, screen stays black" failure.
+// [VENDOR] TEST_MIPI_DSI_PHY_PWR_LDO_CHAN / _VOLTAGE_MV.
 #define DSI_LDO_CHANNEL     3
 #define DSI_LDO_MV          2500
 
