@@ -53,9 +53,10 @@ existing proof of portability:
 1. **Display driver.** `Arduino_GFX` has no MIPI-DSI path, so `display.cpp` cannot be
    reused. The panel needs ESP-IDF's `esp_lcd_mipi_dsi` driven from the Arduino
    framework (legal — Arduino-ESP32 3.x exposes IDF APIs). This is the largest single
-   piece of work.
-2. **Touch driver.** Controller not yet identified; GT911 is the usual Waveshare choice
-   but that is a guess and must be read off the vendor demo, not assumed.
+   piece of work, and there is a **known hazard** here — see below.
+2. **Touch driver.** Reported as **GT911** at its default address by a community ESPHome
+   config for this exact board, and reported working. Still to be confirmed against the
+   vendor demo rather than trusted outright.
 3. **Networking.** No longer the main risk: the Arduino networking objects compile for
    P4 (see the table above), so `esp_hosted` is transparent at the API level. Still
    unproven at runtime — the C6 needs hosted firmware, and WiFiManager's captive portal
@@ -66,6 +67,29 @@ existing proof of portability:
 5. **UI layout pass.** Geometry is now parameterised, but many alignment offsets in
    `ui.cpp` are absolute pixels tuned for 466×466. They will render small and
    off-balance at 720×720 until they are proportional.
+
+## Known hazard: the MIPI-DSI panel
+
+Someone running **this exact board** under ESPHome got audio, microphones, the media
+player, the voice assistant and the **touchscreen** all working, and never got a single
+pixel out of the display. Their logs reported success throughout. Worth knowing before
+losing an evening to it:
+
+- They reused the **10.1" WAVESHARE-P4-NANO** panel driver, assuming "same LCD driver,
+  minor timing differences". The numbers argue otherwise: their porches give
+  800 x 760 total at 80 MHz pclk, about **131 Hz**, which is not a 4" panel figure.
+- Nobody in that thread solved it. ESPHome's `mipi_dsi` component is new and needs a
+  per-panel driver that this display does not yet have.
+- The important detail: they said **the vendor's own examples worked** before they
+  started modifying things. So the panel is drivable — by ESP-IDF's `esp_lcd_mipi_dsi`
+  with Waveshare's init sequence. That is the route this port should take, and it is
+  *more* likely to work than the ESPHome path, not less.
+- The DSI PHY runs off an internal LDO (**channel 3 at 2.5 V**) that has to be switched
+  on explicitly. Omitting it produces exactly the "everything logs fine, screen stays
+  black" symptom.
+
+Practical consequence: **get the vendor ESP-IDF demo running first and capture its init
+sequence and timings verbatim.** Do not port timings from another panel.
 
 ## Performance note
 

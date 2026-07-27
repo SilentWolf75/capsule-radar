@@ -39,23 +39,46 @@
 #define PIN_I2C_SCL         8
 
 // ---------- Panel / touch ----------
-// MIPI-DSI needs no databus GPIOs (the DSI PHY is dedicated), but reset/backlight and
-// the touch controller's INT/RST are board wiring and still have to come from the demo.
-#define PIN_LCD_RST         -1
-#define PIN_LCD_BL          -1
+// MIPI-DSI needs no databus GPIOs (the PHY is dedicated). The values below marked
+// [COMMUNITY] come from a working ESPHome configuration for this exact board, not from
+// Waveshare. They are far better than a guess but are NOT vendor-verified: confirm each
+// against the vendor demo before trusting it. Audio and backlight were reported working;
+// the display was not (see docs/PORT_P4.md).
+#define PIN_LCD_RST         -1             // not in the community config
+#define PIN_LCD_BL          26             // [COMMUNITY] LEDC PWM backlight
 #define PIN_TP_INT          -1
 #define PIN_TP_RST          -1
 #define TP_MIRROR_X         false          // unverified: confirm against the touch demo
 #define TP_MIRROR_Y         false
-#define I2C_ADDR_TOUCH      -1             // controller not yet identified (GT911 likely)
+#define I2C_ADDR_TOUCH      0x14           // [COMMUNITY] GT911, its default address
+
+// MIPI-DSI panel timing. [COMMUNITY] and SUSPECT: these were lifted from the 10.1"
+// P4-NANO panel and the reporter never got output with them. 720+20+40+20 = 800 htotal
+// and 720+4+24+12 = 760 vtotal at 80 MHz implies ~131 Hz, which is not a 4" panel
+// figure. Treat as a starting point to replace with the vendor demo's own values.
+#define DSI_LANES           2
+#define DSI_LANE_BITRATE_HZ 1500000000UL
+#define DSI_PCLK_HZ         80000000UL
+#define DSI_HSYNC_PULSE     20
+#define DSI_HSYNC_FRONT     40
+#define DSI_HSYNC_BACK      20
+#define DSI_VSYNC_PULSE     4
+#define DSI_VSYNC_FRONT     24
+#define DSI_VSYNC_BACK      12
+// The DSI PHY is powered from an internal LDO that must be switched on explicitly.
+// Forgetting it is the classic "everything logs fine, screen stays black" failure.
+#define DSI_LDO_CHANNEL     3
+#define DSI_LDO_MV          2500
 
 // ---------- ES8311 codec over I2S ----------
-#define PIN_I2S_MCLK        -1
-#define PIN_I2S_BCLK        -1
-#define PIN_I2S_LRCLK       -1
-#define PIN_I2S_DOUT        -1
-#define PIN_I2S_DIN         -1
-#define PIN_AUDIO_PA        -1
+// [COMMUNITY] reported working on this board.
+#define PIN_I2S_MCLK        13
+#define PIN_I2S_BCLK        12
+#define PIN_I2S_LRCLK       10
+#define PIN_I2S_DOUT        9              // ESP32 -> codec (speaker)
+#define PIN_I2S_DIN         11             // codec -> ESP32 (mics)
+#define PIN_AUDIO_PA        53             // BSP_POWER_AMP_IO
+#define I2C_ADDR_AUDIO      0x18
 #define PIN_BOOT_BUTTON     -1
 
 // ---------- Peripherals present ----------
