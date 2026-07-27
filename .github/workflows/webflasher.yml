@@ -48,6 +48,13 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32-s3-amoled-175
 
+      # The P4 target shares ui.cpp, radar_view.cpp, main.cpp and every data client with
+      # the S3 build. Building it here means a change that quietly breaks portability
+      # fails in CI rather than on the bench. It is not published -- the S3 firmware is
+      # what the flasher serves -- so a failure here blocks a genuine regression only.
+      - name: Build the ESP32-P4 target (portability check)
+        run: pio run -e esp32-p4-lcd-4c
+
       - name: Stage the flashable images
         run: |
           B=.pio/build/esp32-s3-amoled-175
