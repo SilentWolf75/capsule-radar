@@ -1,7 +1,7 @@
 #pragma once
 // Waveshare ESP32-P4-WIFI6-Touch-LCD-4C — 4" round IPS, 720x720, MIPI-DSI.
 //
-// STATUS: PORT IN PROGRESS. This board is not yet supported end to end; see
+// STATUS: drivers written against vendor data; nothing hardware-verified yet. See
 // docs/PORT_P4.md for what is done, what is blocked, and why.
 //
 // Hardware, from the vendor wiki (waveshare.com/wiki/ESP32-P4-WIFI6-Touch-LCD-4C):
@@ -12,9 +12,10 @@
 //     has NO radio. Networking goes through esp_hosted, not the native Wi-Fi stack.
 //   MIPI-CSI 2-lane camera header, SDIO 3.0 TF slot, ES8311 audio codec
 //
-// Anything below marked -1 is NOT yet confirmed from the vendor. Per CLAUDE.md these
-// are never guessed: they come from the Waveshare demo or they stay -1 and the build
-// refuses to pretend otherwise.
+// Provenance is tagged per value:
+//   [VENDOR]    from ESP32-P4-WIFI6-Touch-LCD-XC-Demo.zip (Arduino/libraries/displays)
+//   [COMMUNITY] from an ESPHome config for this board; plausible, not vendor-confirmed
+// Per CLAUDE.md nothing here is guessed: it is sourced or it stays -1.
 
 #define BOARD_NAME          "Waveshare ESP32-P4-WIFI6-Touch-LCD-4C"
 #define BOARD_PANEL_QSPI    0
@@ -39,23 +40,22 @@
 #define PIN_I2C_SCL         8
 
 // ---------- Panel / touch ----------
-// MIPI-DSI needs no databus GPIOs (the PHY is dedicated). The values below marked
-// [COMMUNITY] come from a working ESPHome configuration for this exact board, not from
-// Waveshare. They are far better than a guess but are NOT vendor-verified: confirm each
-// against the vendor demo before trusting it. Audio and backlight were reported working;
-// the display was not (see docs/PORT_P4.md).
-#define PIN_LCD_RST         -1             // not in the community config
+// MIPI-DSI needs no databus GPIOs (the PHY is dedicated). Panel reset, touch reset and
+// the touch address are now [VENDOR]; the backlight pin is still only [COMMUNITY].
+#define PIN_LCD_RST         27             // [VENDOR] displays_config.h .lcd_rst
 #define PIN_LCD_BL          26             // [COMMUNITY] LEDC PWM backlight
-#define PIN_TP_INT          -1
-#define PIN_TP_RST          -1
+#define PIN_TP_INT          -1             // [VENDOR] GPIO_NUM_NC - not connected
+#define PIN_TP_RST          23             // [VENDOR] gt911.h EXAMPLE_PIN_NUM_TOUCH_RST
 #define TP_MIRROR_X         false          // unverified: confirm against the touch demo
 #define TP_MIRROR_Y         false
-#define I2C_ADDR_TOUCH      0x14           // [COMMUNITY] GT911, its default address
+#define I2C_ADDR_TOUCH      0x5D           // [VENDOR] GT911 default; 0x14 if INT high at reset
+#define I2C_ADDR_TOUCH_ALT  0x14
+#define I2C_CLOCK_HZ        100000         // [VENDOR] .i2c_clock_speed - NOT 400 kHz
 
-// MIPI-DSI panel timing. [COMMUNITY] and SUSPECT: these were lifted from the 10.1"
-// P4-NANO panel and the reporter never got output with them. 720+20+40+20 = 800 htotal
-// and 720+4+24+12 = 760 vtotal at 80 MHz implies ~131 Hz, which is not a 4" panel
-// figure. Treat as a starting point to replace with the vendor demo's own values.
+// MIPI-DSI panel timing. [VENDOR] -- these are the demo's own 4INCH-DSI values, taken
+// from displays_config.h. An earlier note here called them suspect on the grounds that
+// the implied refresh looked high for a 4" panel; that reasoning was wrong. They match
+// the vendor exactly.
 #define DSI_LANES           2
 #define DSI_LANE_BITRATE_HZ 1500000000UL
 #define DSI_PCLK_HZ         80000000UL

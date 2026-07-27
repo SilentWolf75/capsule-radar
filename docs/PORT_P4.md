@@ -73,6 +73,29 @@ existing proof of portability:
    `ui.cpp` are absolute pixels tuned for 466×466. They will render small and
    off-balance at 720×720 until they are proportional.
 
+## The vendor demo is published — use it
+
+`ESP32-P4-WIFI6-Touch-LCD-XC-Demo.zip` (linked from the wiki, ~118 MB) contains an
+`Arduino/` tree, and it answers everything that looked hardware-blocked:
+
+- `Arduino/libraries/displays/displays_config.h` — the `4INCH-DSI` config: timings,
+  `lcd_rst = 27`, `i2c_sda = 7`, `i2c_scl = 8`, `i2c_clock_speed = 100000`, and a
+  **197-command init sequence**, now transcribed verbatim into
+  `src/boards/p4_panel_init.h`.
+- `Arduino/libraries/displays/gt911.h` — confirms GT911, addresses 0x5D / 0x14, and
+  `TOUCH_RST = GPIO23` with `TOUCH_INT` not connected.
+- `Arduino/libraries/GFX_Library_for_Arduino/src/databus/Arduino_ESP32DSIPanel.cpp` —
+  a MIPI-DSI databus for Arduino_GFX. An earlier claim in these notes that
+  "Arduino_GFX has no DSI path" was **wrong**. This port still goes straight to
+  `esp_lcd_mipi_dsi`, which avoids depending on the vendor's library fork.
+
+Two corrections worth carrying forward:
+
+- The timings previously flagged SUSPECT here are **the vendor's own values**. The
+  reasoning that produced that flag (implied refresh looked high for a 4" panel) was
+  simply wrong.
+- I2C runs at **100 kHz** on this board, not the 400 kHz that would be a natural default.
+
 ## Known hazard: the MIPI-DSI panel
 
 Someone running **this exact board** under ESPHome got audio, microphones, the media
@@ -123,12 +146,13 @@ project rule, unconfirmed pins stay `-1` and the build fails rather than guessin
 
 ## Order of work once the board is in hand
 
-1. Run the **vendor ESP-IDF display demo** first and capture its init sequence and video
-   timings verbatim. This is the known-good reference and the one thing that cannot be
-   derived off-hardware.
-2. Paste those into `waveshare_p4_lcd_4c.h` (timings) and `display_p4.cpp` (`kInitSeq`),
-   and confirm the [COMMUNITY] pins while you are there.
-3. Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:` on serial.
+1. ~~Capture the vendor init sequence and timings.~~ **Done** — extracted from the
+   published demo zip, no hardware needed. See `src/boards/p4_panel_init.h`.
+2. Confirm the one remaining [COMMUNITY] value, the backlight pin (GPIO26), against the
+   vendor demo or the schematic PDF.
+3. Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:` on serial. The init
+   sequence and timings are already in place from the vendor demo, so this may simply
+   work; if it does not, re-extract rather than tweak.
 4. Touch should announce itself as `[gt911] found at 0x..`; fix axis mirroring in the
    board header if the coordinates come out flipped.
 5. Prove `esp_hosted` Wi-Fi with a plain HTTPS GET before wiring the ADS-B client.

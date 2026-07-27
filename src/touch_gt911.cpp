@@ -15,8 +15,8 @@
 #include <Wire.h>
 #include "touch_gt911.h"
 
-#define GT911_ADDR_A        0x5D
-#define GT911_ADDR_B        0x14
+#define GT911_ADDR_A        I2C_ADDR_TOUCH
+#define GT911_ADDR_B        I2C_ADDR_TOUCH_ALT
 #define GT911_REG_STATUS    0x814E   // bit7 = data ready, bits3..0 = touch count
 #define GT911_REG_POINT1    0x8150   // x_lo, x_hi, y_lo, y_hi, size_lo, size_hi, reserved
 #define GT911_REG_PRODUCT   0x8140   // 4 ASCII bytes, "911" for a GT911
@@ -42,8 +42,17 @@ static bool wr8(uint16_t reg, uint8_t v) {
 }
 
 bool touch_gt911_begin(void) {
+    // Hold the controller in reset briefly so it latches a known address. INT is not
+    // connected on this board (vendor: GPIO_NUM_NC), so it strays to the 0x5D default.
+    if (PIN_TP_RST >= 0) {
+        pinMode(PIN_TP_RST, OUTPUT);
+        digitalWrite(PIN_TP_RST, LOW);
+        delay(10);
+        digitalWrite(PIN_TP_RST, HIGH);
+        delay(60);
+    }
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-    Wire.setClock(400000);
+    Wire.setClock(I2C_CLOCK_HZ);   // [VENDOR] 100 kHz; 400 k is not what the demo uses
 
     const uint8_t candidates[2] = { GT911_ADDR_A, GT911_ADDR_B };
     uint8_t id[4] = {0};

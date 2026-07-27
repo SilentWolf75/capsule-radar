@@ -1,14 +1,15 @@
 // MIPI-DSI panel bring-up for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4C.
 //
-// Arduino_GFX has no DSI path, so this drives the panel through ESP-IDF's
-// esp_lcd_mipi_dsi, which Arduino-ESP32 3.x exposes. Structure follows the standard
+// Drives the panel through ESP-IDF's esp_lcd_mipi_dsi, which Arduino-ESP32 3.x exposes.
+// (An earlier note here claimed Arduino_GFX has no DSI path. That was wrong -- the
+// vendor demo ships a fork with Arduino_ESP32DSIPanel. Going straight to esp_lcd keeps
+// this independent of that fork.) Structure follows the standard
 // IDF sequence: power the PHY's LDO, create the DSI bus, create a DBI channel to send
 // the panel's init commands, create the DPI video panel, then hand frames to LVGL.
 //
-// UNVERIFIED AGAINST HARDWARE. The board is not here yet. Everything specific to this
-// panel -- the init sequence and the video timings -- is isolated below precisely so it
-// can be replaced with the vendor demo's values without touching the driver logic.
-// See docs/PORT_P4.md for why those values are suspect.
+// UNVERIFIED AGAINST HARDWARE (the board is not here yet), but the panel-specific data
+// is no longer guesswork: the init sequence and video timings are transcribed from the
+// vendor demo's own 4INCH-DSI configuration. See docs/PORT_P4.md.
 #include "config.h"
 #if defined(BOARD_WAVESHARE_P4_LCD_4C)
 
@@ -27,20 +28,7 @@ static esp_lcd_panel_io_handle_t s_io    = nullptr;
 static esp_lcd_panel_handle_t    s_panel = nullptr;
 static esp_ldo_channel_handle_t  s_ldo   = nullptr;
 
-// ---------------------------------------------------------------------------------
-// PANEL-SPECIFIC DATA -- replace wholesale from the Waveshare demo.
-//
-// Single-byte register writes (reg, value). The 0xE0 page-select opening is the
-// ILI9881/JD9365 family idiom. This is a MINIMAL placeholder: enough to exercise the
-// code path, NOT enough to light a panel correctly. Capture the vendor sequence and
-// paste it here; the driver below needs no changes to accept a longer table.
-// ---------------------------------------------------------------------------------
-struct PanelReg { uint8_t reg, val; };
-static const PanelReg kInitSeq[] = {
-    { 0xE0, 0x00 },                                  // page 0
-    { 0xE1, 0x93 }, { 0xE2, 0x65 }, { 0xE3, 0xF8 },  // vendor unlock
-    { 0x80, 0x01 },
-};
+#include "boards/p4_panel_init.h"   // 197 vendor init registers, transcribed verbatim
 
 bool display_p4_begin(void) {
     // 1) The DSI PHY is fed by an internal LDO. Without this the whole chain reports
@@ -75,12 +63,13 @@ bool display_p4_begin(void) {
         return false;
     }
 
-    for (size_t i = 0; i < sizeof(kInitSeq) / sizeof(kInitSeq[0]); ++i) {
-        const uint8_t v = kInitSeq[i].val;
-        esp_lcd_panel_io_tx_param(s_io, kInitSeq[i].reg, &v, 1);
+    for (size_t i = 0; i < sizeof(kPanelInit) / sizeof(kPanelInit[0]); ++i) {
+        const uint8_t v = kPanelInit[i].val;
+        esp_lcd_panel_io_tx_param(s_io, kPanelInit[i].reg, &v, 1);
+        if (kPanelInit[i].delay_ms) delay(kPanelInit[i].delay_ms);
     }
 
-    // 4) DPI video panel. Timings come from the board header; see the SUSPECT note there.
+    // 4) DPI video panel, timings from the board header (the vendor's own values).
     esp_lcd_dpi_panel_config_t dpi_cfg = {};
     dpi_cfg.virtual_channel     = 0;
     dpi_cfg.dpi_clk_src         = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
