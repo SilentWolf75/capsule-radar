@@ -46,8 +46,10 @@
 #define PIN_LCD_BL          26             // [VENDOR] TEST_PIN_NUM_BK_LIGHT
 #define PIN_TP_INT          -1             // [VENDOR] GPIO_NUM_NC - not connected
 #define PIN_TP_RST          23             // [VENDOR] gt911.h EXAMPLE_PIN_NUM_TOUCH_RST
-#define TP_MIRROR_X         false          // unverified: confirm against the touch demo
+// [VENDOR] gt911.cpp sets swap_xy = 0, mirror_x = 0, mirror_y = 0 for this panel.
+#define TP_MIRROR_X         false
 #define TP_MIRROR_Y         false
+#define TP_SWAP_XY          false
 #define I2C_ADDR_TOUCH      0x5D           // [VENDOR] GT911 default; 0x14 if INT high at reset
 #define I2C_ADDR_TOUCH_ALT  0x14
 #define I2C_CLOCK_HZ        100000         // [VENDOR] .i2c_clock_speed - NOT 400 kHz
@@ -93,8 +95,10 @@
 #define I2C_ADDR_RTC        -1
 #define I2C_ADDR_PMIC       -1
 
-// Networking is via the C6 over SDIO (esp_hosted), so the Arduino WiFi objects are not
-// a given. Flagged so code can branch instead of silently failing to connect.
+// Networking is via the C6 over SDIO (esp_hosted). [VENDOR] The demo's own Arduino
+// example (GFX_ESPWiFiAnalyzer.ino) uses plain WiFi.h -- WiFi.mode/scanNetworks -- with
+// no hosted-specific init, so the standard API is expected to work unchanged. The flag
+// stays for code that may still want to know there is no native radio.
 #define BOARD_WIFI_HOSTED   1
 
 #if (PIN_I2C_SDA < 0) || (PIN_I2C_SCL < 0)

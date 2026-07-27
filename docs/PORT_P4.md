@@ -60,12 +60,13 @@ existing proof of portability:
 2. ~~**Touch driver.**~~ **Written** — `src/touch_gt911.cpp`. GT911's register map is
    documented, so the protocol is not guesswork. It probes both possible addresses
    (0x5D and 0x14, strapped by INT at reset) and verifies the `911` product id rather
-   than assuming one, which removes a common bring-up dead end. Axis mirroring still
-   needs confirming on hardware.
-3. **Networking.** No longer the main risk: the Arduino networking objects compile for
-   P4 (see the table above), so `esp_hosted` is transparent at the API level. Still
-   unproven at runtime — the C6 needs hosted firmware, and WiFiManager's captive portal
-   assumes a native AP mode, which is the piece most likely to need replacing.
+   than assuming one. Axis orientation is [VENDOR] too: `gt911.cpp` sets swap_xy,
+   mirror_x and mirror_y all to 0.
+3. ~~**Networking.**~~ Effectively settled off-hardware. The Arduino objects compile for
+   P4, and the vendor's own Arduino example for this board (`GFX_ESPWiFiAnalyzer.ino`)
+   uses plain `WiFi.h` with no hosted-specific init at all — so there is no missing
+   setup step to discover. Unproven at runtime, and WiFiManager's captive portal (which
+   assumes a native AP mode) remains the piece most likely to need attention.
 4. **Peripheral fallbacks.** No IMU, RTC or PMIC. Face-down sleep, the pre-WiFi clock and
    battery reporting must degrade gracefully rather than be assumed present — hence the
    `BOARD_HAS_*` flags.
