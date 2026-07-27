@@ -91,6 +91,10 @@
 #define BOARD_HAS_RTC       0
 #define BOARD_HAS_PMIC      0
 #define BOARD_HAS_AUDIO     1
+// WiFiManager references CONFIG_ESP32_PHY_MAX_WIFI_TX_POWER, which only exists on a
+// chip with a native PHY. The P4 has none (the C6 is the radio), so it cannot build
+// there and the captive portal needs a different mechanism.
+#define BOARD_HAS_WIFIMANAGER 0
 #define I2C_ADDR_IMU        -1
 #define I2C_ADDR_RTC        -1
 #define I2C_ADDR_PMIC       -1

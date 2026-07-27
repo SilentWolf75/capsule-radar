@@ -2,10 +2,11 @@
 
 Target: **Waveshare ESP32-P4-WIFI6-Touch-LCD-4C** — 4" round IPS, 720×720, MIPI-DSI.
 
-Status: **display and touch drivers written and compiling; nothing hardware-verified.**
-`pio run -e esp32-p4-lcd-4c` builds the whole firmware for RISC-V at 720x720 -- the UI,
-every data client, a MIPI-DSI panel driver and a GT911 touch driver. It has never run
-on hardware; the board is not here.
+Status: **the whole application builds for P4; nothing hardware-verified.**
+`pio run -e esp32-p4-lcd-4c` now builds `main.cpp` itself -- the ADS-B feed and task,
+the web config server, OTA, NVS, audio, GPS and every data client -- against the DSI
+panel driver and GT911 touch, at 720x720 on RISC-V. Not a UI demo any more. It has
+never run on hardware; the board is not here.
 
 Verified on this toolchain, no hardware required:
 
@@ -67,9 +68,22 @@ existing proof of portability:
    uses plain `WiFi.h` with no hosted-specific init at all — so there is no missing
    setup step to discover. Unproven at runtime, and WiFiManager's captive portal (which
    assumes a native AP mode) remains the piece most likely to need attention.
-4. **Peripheral fallbacks.** No IMU, RTC or PMIC. Face-down sleep, the pre-WiFi clock and
-   battery reporting must degrade gracefully rather than be assumed present — hence the
-   `BOARD_HAS_*` flags.
+4. ~~**Peripheral fallbacks.**~~ **Done** — `src/p4_shims.cpp` supplies the `display::`
+   namespace (forwarding to the DSI driver) plus honest no-ops for the absent IMU, RTC
+   and PMIC. `imu_facedown()` returns -1 (unavailable, so the caller leaves state alone)
+   and `battery_percent()` returns -1 (unknown, so the HUD hides the indicator) rather
+   than inventing plausible-looking values.
+
+   Two gaps are deliberate and visible: display rotation reports 0 because the S3 path
+   rotates by transposing flush blocks, which does not apply to a panel that owns its
+   framebuffer; and `captureFrame()` returns nullptr, so `/shot.bmp` fails honestly
+   instead of serving garbage. Both are wire-ups, not blockers.
+
+   **WiFiManager cannot build for P4** — it references
+   `CONFIG_ESP32_PHY_MAX_WIFI_TX_POWER`, which only exists on a chip with a native PHY.
+   It is compiled out behind `BOARD_HAS_WIFIMANAGER`; the P4 instead connects with
+   credentials from NVS and raises a `SkyGlass-Setup` SoftAP when none are stored, so
+   the existing config page is still the way in.
 5. ~~**UI layout pass.**~~ **Done** — 96 absolute placements in `ui.cpp` now go through
    `UI_S()`, which maps the 466-wide design space onto the built panel. Fonts cannot
    follow a scale factor (LVGL sizes are discrete), so `UI_BIG_PANEL` steps the tier up

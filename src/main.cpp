@@ -40,7 +40,9 @@
 #include "audio.h"                   // ES8311 alert pings
 #include <set>                       // audio: track which contacts are in range
 #include <string>
+#if BOARD_HAS_WIFIMANAGER
 #include <WiFiManager.h>             // captive portal
+#endif
 #include <Preferences.h>            // NVS (persist theme/settings)
 #include <time.h>                   // NTP/RTC clock + date
 #include <WebServer.h>              // configuration web page
@@ -57,7 +59,9 @@ static SemaphoreHandle_t     g_ac_mutex;      // guards g_aircraft
 static volatile bool         g_acDirty = false; // set when a new snapshot is ready
 static AdsbClient            g_adsb;
 static RadarSettings         g_settings;
+#if BOARD_HAS_WIFIMANAGER
 static WiFiManager           g_wm;
+#endif
 static int                   g_brightnessDay = BRIGHTNESS_DEFAULT;   // user brightness (web/NVS)
 static int                   g_volume = 60;                          // alert volume 0..100 (web/NVS)
 static bool                  g_muted  = false;                       // mute alert pings
@@ -991,7 +995,9 @@ static void handleWifi() {
     // core 3.x both wm.resetSettings() and WiFi.disconnect(true,true) can silently no-op
     // (they fail once the driver is off), so v1.3.19's reset still reconnected. Erasing that
     // namespace directly is unconditional — it works whatever state the WiFi driver is in.
+#if BOARD_HAS_WIFIMANAGER
     g_wm.resetSettings();           // best-effort driver-level erase first...
+#endif
     WiFi.disconnect(false, true);   // ...keep WiFi up so the erase can actually run
     delay(100);
     nvs_handle_t h;                 // ...then the guaranteed path: wipe the driver's namespace
@@ -1570,7 +1576,11 @@ void setup() {
     delay(200);
     Serial.println("\nSkyGlass boot");
 
+#if BOARD_PANEL_QSPI
     if (PIN_LCD_SCLK < 0 || PIN_I2C_SDA < 0) {
+#else
+    if (PIN_I2C_SDA < 0) {
+#endif
         Serial.println("[!] Pins in config.h are still -1. Copy them from the Waveshare demo.");
     }
     Serial.printf("PSRAM: %u bytes free\n", (unsigned)ESP.getFreePsram());
@@ -1652,6 +1662,7 @@ void setup() {
     // --- WiFi (captive portal, non-blocking) ------------------------------
     // First boot opens the "SkyGlass-Setup" AP to enter WiFi creds. Non-blocking
     // so the radar keeps animating while you configure WiFi from your phone.
+#if BOARD_HAS_WIFIMANAGER
     g_wm.setConfigPortalBlocking(false);
     g_wm.setTitle("SkyGlass");
     // light phosphor-green theme for the captive portal (small CSS, injected into <head>)
@@ -1676,6 +1687,24 @@ void setup() {
         Serial.println("[wifi] connected");
     else
         Serial.println("[wifi] config portal open - join 'SkyGlass-Setup' to set WiFi; UI stays live");
+#else
+    // No WiFiManager on this board. Connect with whatever the config page stored; if
+    // nothing is stored yet, raise a SoftAP so that page is reachable to enter it.
+    {
+        Preferences wp; wp.begin("capsuleradar", true);
+        const String ss = wp.getString("wifiSsid", ""), pw = wp.getString("wifiPass", "");
+        wp.end();
+        if (ss.length()) {
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(ss.c_str(), pw.c_str());
+            Serial.printf("[wifi] connecting to %s\n", ss.c_str());
+        } else {
+            WiFi.mode(WIFI_AP);
+            WiFi.softAP("SkyGlass-Setup");
+            Serial.println("[wifi] no credentials - join 'SkyGlass-Setup' and open 192.168.4.1");
+        }
+    }
+#endif
 
     // --- OTA ---------------------------------------------------------------
     // ArduinoOTA is started from loop() once WiFi connects (see otaUp there).
@@ -1767,7 +1796,9 @@ void setup() {
 
 void loop() {
     display::loop();                // drive LVGL (render dirty areas + run timers)
+#if BOARD_HAS_WIFIMANAGER
     g_wm.process();                 // service the WiFi config portal (non-blocking)
+#endif
     g_web.handleClient();           // serve the configuration web page
     if (g_useGps) gps_poll();       // pull NMEA from the LC76G (only when GPS auto-location is on)
 
