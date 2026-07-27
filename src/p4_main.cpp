@@ -16,12 +16,15 @@
 #include <esp_heap_caps.h>
 #include "ui.h"
 #include "radar_view.h"
+#include "display_p4.h"
+#include "touch_gt911.h"
 
 static lv_disp_draw_buf_t s_dbuf;
 static lv_disp_drv_t      s_drv;
 static lv_color_t        *s_buf = nullptr;
 
-// Discards the frame. The panel is not driven yet; see the file header.
+// Used only if DSI bring-up fails, so the UI still builds and the logs stay readable
+// instead of the firmware hanging on a dead panel.
 static void flush_null(lv_disp_drv_t *drv, const lv_area_t *, lv_color_t *) {
     lv_disp_flush_ready(drv);
 }
@@ -38,12 +41,23 @@ void setup() {
     if (!s_buf) { Serial.println("[p4] draw buffer alloc failed"); return; }
     lv_disp_draw_buf_init(&s_dbuf, s_buf, nullptr, px);
 
+    const bool panelUp = display_p4_begin();
+    if (!panelUp) Serial.println("[p4] DSI bring-up failed; running headless");
+
     lv_disp_drv_init(&s_drv);
     s_drv.hor_res  = SCREEN_W;
     s_drv.ver_res  = SCREEN_H;
-    s_drv.flush_cb = flush_null;
+    s_drv.flush_cb = panelUp ? display_p4_flush : flush_null;
     s_drv.draw_buf = &s_dbuf;
     lv_disp_drv_register(&s_drv);
+
+    if (touch_gt911_begin()) {
+        static lv_indev_drv_t indev;
+        lv_indev_drv_init(&indev);
+        indev.type    = LV_INDEV_TYPE_POINTER;
+        indev.read_cb = touch_gt911_lvgl_read;
+        lv_indev_drv_register(&indev);
+    }
 
     // No tick timer needed: lv_conf.h sets LV_TICK_CUSTOM to millis(), same as the S3 build.
     ui_create();

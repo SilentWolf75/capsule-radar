@@ -2,7 +2,7 @@
 
 Target: **Waveshare ESP32-P4-WIFI6-Touch-LCD-4C** — 4" round IPS, 720×720, MIPI-DSI.
 
-Status: **the portable half is proven to build for P4.** `pio run -e esp32-p4-lcd-4c`
+Status: **display and touch drivers are written and compiling; nothing is hardware-verified.** `pio run -e esp32-p4-lcd-4c`
 compiles and links the entire UI and every data client for RISC-V at 720x720 against a
 null display flush. Nothing has run on hardware yet -- the board is not here.
 
@@ -50,13 +50,17 @@ existing proof of portability:
 
 ## What has to be written
 
-1. **Display driver.** `Arduino_GFX` has no MIPI-DSI path, so `display.cpp` cannot be
-   reused. The panel needs ESP-IDF's `esp_lcd_mipi_dsi` driven from the Arduino
-   framework (legal — Arduino-ESP32 3.x exposes IDF APIs). This is the largest single
-   piece of work, and there is a **known hazard** here — see below.
-2. **Touch driver.** Reported as **GT911** at its default address by a community ESPHome
-   config for this exact board, and reported working. Still to be confirmed against the
-   vendor demo rather than trusted outright.
+1. ~~**Display driver.**~~ **Written** — `src/display_p4.cpp` drives the panel through
+   ESP-IDF's `esp_lcd_mipi_dsi`: PHY LDO, DSI bus, DBI channel for the init registers,
+   DPI video panel with DMA2D blitting, LEDC backlight, and an LVGL flush. Compiles.
+   **Unverified against hardware**, and the two panel-specific pieces — the init
+   sequence and the video timings — are deliberately isolated so the vendor demo's
+   values drop in without touching driver logic. See the hazard section below.
+2. ~~**Touch driver.**~~ **Written** — `src/touch_gt911.cpp`. GT911's register map is
+   documented, so the protocol is not guesswork. It probes both possible addresses
+   (0x5D and 0x14, strapped by INT at reset) and verifies the `911` product id rather
+   than assuming one, which removes a common bring-up dead end. Axis mirroring still
+   needs confirming on hardware.
 3. **Networking.** No longer the main risk: the Arduino networking objects compile for
    P4 (see the table above), so `esp_hosted` is transparent at the API level. Still
    unproven at runtime — the C6 needs hosted firmware, and WiFiManager's captive portal
