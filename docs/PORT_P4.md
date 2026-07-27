@@ -2,9 +2,10 @@
 
 Target: **Waveshare ESP32-P4-WIFI6-Touch-LCD-4C** — 4" round IPS, 720×720, MIPI-DSI.
 
-Status: **display and touch drivers are written and compiling; nothing is hardware-verified.** `pio run -e esp32-p4-lcd-4c`
-compiles and links the entire UI and every data client for RISC-V at 720x720 against a
-null display flush. Nothing has run on hardware yet -- the board is not here.
+Status: **display and touch drivers written and compiling; nothing hardware-verified.**
+`pio run -e esp32-p4-lcd-4c` builds the whole firmware for RISC-V at 720x720 -- the UI,
+every data client, a MIPI-DSI panel driver and a GT911 touch driver. It has never run
+on hardware; the board is not here.
 
 Verified on this toolchain, no hardware required:
 
@@ -31,7 +32,7 @@ Worth being blunt up front, because it is not simply "a bigger S3":
 | PSRAM / flash | 8 MB / 16 MB | **32 MB / 32 MB** |
 | Panel | CO5300 AMOLED 466×466, **QSPI** | IPS 720×720, **MIPI-DSI 2-lane** |
 | Radio | native Wi-Fi + BLE | **none** — ESP32-C6-MINI-1 over SDIO |
-| Touch | CST9217 @ 0x5A | not yet identified |
+| Touch | CST9217 @ 0x5A | **GT911** (driver written) |
 | IMU / RTC / PMIC | QMI8658 / PCF85063 / AXP2101 | none of them |
 | Audio | ES8311 | ES8311 (same part) |
 | I2C | SDA 15, SCL 14 | **SDA 7, SCL 8** (confirmed in vendor wiki) |
@@ -122,10 +123,13 @@ project rule, unconfirmed pins stay `-1` and the build fails rather than guessin
 
 ## Order of work once the board is in hand
 
-1. Flash a vendor demo first and confirm the panel lights up — establishes the toolchain
-   and gives the real pin values.
-2. Copy the confirmed pins into `waveshare_p4_lcd_4c.h`.
-3. Bring up MIPI-DSI + LVGL with a static test pattern.
-4. Bring up touch.
+1. Run the **vendor ESP-IDF display demo** first and capture its init sequence and video
+   timings verbatim. This is the known-good reference and the one thing that cannot be
+   derived off-hardware.
+2. Paste those into `waveshare_p4_lcd_4c.h` (timings) and `display_p4.cpp` (`kInitSeq`),
+   and confirm the [COMMUNITY] pins while you are there.
+3. Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:` on serial.
+4. Touch should announce itself as `[gt911] found at 0x..`; fix axis mirroring in the
+   board header if the coordinates come out flipped.
 5. Prove `esp_hosted` Wi-Fi with a plain HTTPS GET before wiring the ADS-B client.
 6. Then the UI, which should largely already work.
