@@ -2,8 +2,24 @@
 
 Target: **Waveshare ESP32-P4-WIFI6-Touch-LCD-4C** — 4" round IPS, 720×720, MIPI-DSI.
 
-Status: **scaffolding only.** The board abstraction is in place and the existing 1.75"
-build is unaffected. Nothing P4-specific has been compiled or run yet.
+Status: **the portable half is proven to build for P4.** `pio run -e esp32-p4-lcd-4c`
+compiles and links the entire UI and every data client for RISC-V at 720x720 against a
+null display flush. Nothing has run on hardware yet -- the board is not here.
+
+Verified on this toolchain, no hardware required:
+
+| Probe | Result |
+|---|---|
+| Arduino framework targets ESP32-P4 | works, on the platform version already pinned |
+| `WiFi` / `WiFiClientSecure` / `HTTPClient` | compile -- `esp_hosted` is transparent at the Arduino API |
+| `Preferences` / `Update` / `WebServer` / `ESPmDNS` | compile, so NVS, OTA, the config page and mDNS should port |
+| LVGL 8.4 on RISC-V at 720x720 | works |
+| Full SkyGlass UI + clients | **compiles and links**: RAM 30.8%, flash 2.47 MB |
+
+That retires the biggest listed risk. Wi-Fi existing at all on a radio-less P4 was the
+open question; the Arduino objects are present, so the port is a display/touch problem
+rather than a networking rewrite. Compiling is not running -- the C6 must be flashed
+with hosted firmware and that can only be confirmed on the bench.
 
 ## What this board actually is
 
@@ -40,10 +56,10 @@ existing proof of portability:
    piece of work.
 2. **Touch driver.** Controller not yet identified; GT911 is the usual Waveshare choice
    but that is a guess and must be read off the vendor demo, not assumed.
-3. **Networking.** The P4 has no radio. Wi-Fi is an ESP32-C6 over SDIO via `esp_hosted`.
-   Whether the Arduino `WiFi` / `WiFiClientSecure` / `HTTPClient` objects work unchanged
-   on top of that is the single biggest open question — WiFiManager's captive portal in
-   particular assumes a native AP mode.
+3. **Networking.** No longer the main risk: the Arduino networking objects compile for
+   P4 (see the table above), so `esp_hosted` is transparent at the API level. Still
+   unproven at runtime — the C6 needs hosted firmware, and WiFiManager's captive portal
+   assumes a native AP mode, which is the piece most likely to need replacing.
 4. **Peripheral fallbacks.** No IMU, RTC or PMIC. Face-down sleep, the pre-WiFi clock and
    battery reporting must degrade gracefully rather than be assumed present — hence the
    `BOARD_HAS_*` flags.
