@@ -1510,8 +1510,8 @@ static void sp_poly(lv_color_t *b, const float *px, const float *py, int n, lv_c
     if (y1 > SCREEN_H - 1) y1 = SCREEN_H - 1;
     for (int y = y0; y <= y1; ++y) {
         const float fy = y + 0.5f;
-        float xs[10]; int cnt = 0;
-        for (int i = 0; i < n && cnt < 10; ++i) {
+        float xs[24]; int cnt = 0;
+        for (int i = 0; i < n && cnt < 24; ++i) {
             const int j = (i + 1) % n;
             const float ya = py[i], yb = py[j];
             if ((ya <= fy && yb > fy) || (yb <= fy && ya > fy))
@@ -1531,7 +1531,8 @@ static void sp_poly(lv_color_t *b, const float *px, const float *py, int n, lv_c
 // Rotate a local-space shape about (0,0), scale, translate, then fill.
 static void sp_shape(lv_color_t *b, const float *lx, const float *ly, int n,
                      float ox, float oy, float rot, float sc, lv_color_t c, int a) {
-    float px[10], py[10];
+    float px[24], py[24];
+    if (n > 24) return;
     const float s = sinf(rot), co = cosf(rot);
     for (int i = 0; i < n; ++i) {
         px[i] = ox + (lx[i] * co - ly[i] * s) * sc;
@@ -1547,9 +1548,13 @@ static void splash_paint(lv_color_t *b) {
     const float K = (float)SCREEN_W / (float)UI_DESIGN_W;
     // --- sky: vertical gradient from deep night down to a warm horizon ---
     struct { int y; uint32_t rgb; } stop[] = {
-        {           0, 0x050A1E }, { (int)(120*K), 0x0C2350 }, { (int)(230*K), 0x1B4E8C },
-        { (int)(320*K), 0x3E82B8 }, { (int)(384*K), 0xE79A55 }, { (int)(430*K), 0xF8C87C },
-        {    SCREEN_H, 0xFFDCA8 },
+        // Kept dark for most of the height, with the warm band squeezed into the last
+        // sixth. The previous ramp reached full daylight blue by mid-screen and blew the
+        // bottom third out to near-white on a bright IPS panel.
+        {                     0, 0x03060F }, { (int)(SCREEN_H*0.30f), 0x081A3C },
+        { (int)(SCREEN_H*0.52f), 0x113A63 }, { (int)(SCREEN_H*0.72f), 0x1E5580 },
+        { (int)(SCREEN_H*0.86f), 0x8A5A34 }, { (int)(SCREEN_H*0.94f), 0xC08149 },
+        {              SCREEN_H, 0xD9A566 },
     };
     const int nstop = (int)(sizeof(stop) / sizeof(stop[0]));
     for (int y = 0; y < SCREEN_H; ++y) {
@@ -1582,7 +1587,7 @@ static void splash_paint(lv_color_t *b) {
     };
     for (unsigned i = 0; i < sizeof(cloud) / sizeof(cloud[0]); ++i)
         sp_disc(b, cloud[i].x * K, cloud[i].y * K, cloud[i].r * K,
-                lv_color_hex(cloud[i].c), cloud[i].a, 16.0f * K);
+                lv_color_hex(cloud[i].c), cloud[i].a * 3 / 5, 16.0f * K);
 
     // --- radar scope, sitting in the darker upper sky for contrast ---
     const float scx = SCREEN_CX, scy = 196.0f * K;
@@ -1621,35 +1626,21 @@ static void splash_paint(lv_color_t *b) {
                 lv_color_hex(0xCFFFE6), 255, 1.2f * K);
     }
 
-    // --- the aircraft: airliner planform, banking across the scope ---
-    const float rot = -0.34f, sc = 1.32f * K, px_ = scx - 6 * K, py_ = scy + 4 * K;
-    const lv_color_t body = lv_color_hex(0xF2F7FF), shade = lv_color_hex(0x9FB6D4);
-    const float wingL[6] = {  8,  -6, -30, -22,  -2,   6 };
-    const float wingLy[6]= { -4, -10, -54, -56, -12,  -4 };
-    const float wingR[6] = {  8,  -6, -30, -22,  -2,   6 };
-    const float wingRy[6]= {  4,  10,  54,  56,  12,   4 };
-    sp_shape(b, wingL, wingLy, 6, px_, py_, rot, sc, shade, 250);
-    sp_shape(b, wingR, wingRy, 6, px_, py_, rot, sc, body,  250);
-    const float tailL[4] = { -36, -50, -44, -34 };
-    const float tailLy[4]= {  -3, -22, -24,  -3 };
-    const float tailR[4] = { -36, -50, -44, -34 };
-    const float tailRy[4]= {   3,  22,  24,   3 };
-    sp_shape(b, tailL, tailLy, 4, px_, py_, rot, sc, shade, 250);
-    sp_shape(b, tailR, tailRy, 4, px_, py_, rot, sc, body,  250);
-    // Slung just ahead of the swept leading edge. At this span the wing only occupies
-    // x -17..-10, so anything further forward floats free of the aircraft.
-    const float nacL[4] = { -24, -13, -13, -24 };
-    const float nacLy[4]= { -28, -29, -35, -34 };
-    const float nacR[4] = { -24, -13, -13, -24 };
-    const float nacRy[4]= {  28,  29,  35,  34 };
-    sp_shape(b, nacL, nacLy, 4, px_, py_, rot, sc, lv_color_hex(0x4E6B8C), 250);
-    sp_shape(b, nacR, nacRy, 4, px_, py_, rot, sc, lv_color_hex(0x5E7EA4), 250);
-    const float fus[8]  = {  54,  44,  10, -46, -52, -46,  10,  44 };
-    const float fusy[8] = {   0,  -6,  -9,  -7,   0,   7,   9,   6 };
-    sp_shape(b, fus, fusy, 8, px_, py_, rot, sc, body, 255);
-    const float fin[4]  = { -34, -50, -44, -30 };
-    const float finy[4] = {  -1, -12, -13,  -1 };
-    sp_shape(b, fin, finy, 4, px_, py_, rot, sc, lv_color_hex(0x6FA8DC), 250);
+    // --- the aircraft: one closed airliner planform, banking across the scope ---
+    // Third attempt, each driven by seeing it on the panel. The first was assembled from
+    // seven separate pieces and fell apart into sticks and floating blocks when scaled.
+    // The second was one outline but read as a dart, and its tailplane was a detached
+    // grey blob. This traces a single path -- nose, starboard fuselage, wing, rear body,
+    // tailplane, tail cone, and back up the port side -- so every part stays attached and
+    // the proportions say airliner rather than fighter.
+    const float rot = -0.38f, sc = 0.92f * K, px_ = scx, py_ = scy;
+    const lv_color_t body = lv_color_hex(0xF4F8FF);
+
+    const float PLX[20] = {  58,  46,  20,   6,  -6,  -2, -28, -36, -44, -42,
+                            -50, -42, -44, -36, -28,  -2,  -6,   6,  20,  46 };
+    const float PLY[20] = {   0,   5,   7,  40,  44,  10,   8,  26,  24,   4,
+                              0,  -4, -24, -26,  -8, -10, -44, -40,  -7,  -5 };
+    sp_shape(b, PLX, PLY, 20, px_, py_, rot, sc, body, 255);
 
     // --- vignette: the panel is round, so fade the unreachable corners to black ---
     for (int y = 0; y < SCREEN_H; ++y) {

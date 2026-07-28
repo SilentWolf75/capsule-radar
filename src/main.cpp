@@ -1481,6 +1481,10 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
     // Track the currently selected contact (1) or clear tracking (0). TRACK is otherwise
     // a button on the detail card, which left the Tracked view uncapturable remotely.
     if (g_web.hasArg("trk")) ui_track_selected(g_web.arg("trk").toInt() != 0);
+    // Re-show the boot splash on demand. It normally appears for six seconds before WiFi
+    // is up, so it could never be captured with /shot.bmp -- the one screen that had to
+    // be photographed by hand.
+    if (g_web.hasArg("splash")) ui_splash_show();
     if (g_web.hasArg("fire")) {                 // "x,y" in screen pixels, or "reset"
         const String a = g_web.arg("fire");
         const int comma = a.indexOf(',');
