@@ -1275,20 +1275,26 @@ static void build_about(void) {
     char ip[24] = "offline";
     if (WiFi.status() == WL_CONNECTED) snprintf(ip, sizeof(ip), "%s", WiFi.localIP().toString().c_str());
 
-    char body[520];
+    // Board and chip read from the build and the runtime, not hardcoded. This screen
+    // claimed "ESP32-S3 : 8MB PSRAM : dual 240MHz" on a P4 with 32 MB and a different
+    // architecture entirely -- an About screen that lies is worse than none.
+    char body[560];
     snprintf(body, sizeof(body),
              "#63D8FF BUILD#   %s\n"
-             "#63D8FF BOARD#   Waveshare ESP32-S3\n"
-             "         Touch-AMOLED 1.75\"\n"
-             "#63D8FF CHIP#    ESP32-S3 : 8MB PSRAM\n"
-             "         16MB flash : dual 240MHz\n"
+             "#63D8FF BOARD#   %s\n"
+             "#63D8FF CHIP#    %s : %uMB PSRAM\n"
+             "         %uMB flash : %u MHz\n"
              "#63D8FF HOST#    skyglass.local\n"
              "#63D8FF IP#      %s\n"
              "#63D8FF UPTIME#  %luh %lum\n"
              "#63D8FF FEED#    airplanes.live / adsb.lol\n"
              "#9AFFC8 github.com/SilentWolf75/skyglass#\n"
              "#5F7A6C MIT : fork of socquique/capsule-radar#",
-             __DATE__, ip, (unsigned long)(up / 3600UL), (unsigned long)((up / 60UL) % 60UL));
+             __DATE__, BOARD_NAME, ESP.getChipModel(),
+             (unsigned)(ESP.getPsramSize() / (1024 * 1024)),
+             (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)),
+             (unsigned)ESP.getCpuFreqMHz(),
+             ip, (unsigned long)(up / 3600UL), (unsigned long)((up / 60UL) % 60UL));
     lv_label_set_text(s_aboutBody, body);
 }
 
@@ -1347,7 +1353,7 @@ static void build_card(void) {
     s_card = lv_obj_create(s_tileRadar);
     lv_obj_remove_style_all(s_card);
     // large text needs a taller card (three 18px data lines + the route line below them)
-    lv_obj_set_size(s_card, s_bigText ? 316 : 300, s_bigText ? 148 : 118);
+    lv_obj_set_size(s_card, UI_S(s_bigText ? 316 : 300), UI_S(s_bigText ? 148 : 118));
     lv_obj_align(s_card, LV_ALIGN_CENTER, 0, s_bigText ? 56 : 66);
     lv_obj_set_style_bg_color(s_card, UI_PANEL, 0);
     lv_obj_set_style_bg_opa(s_card, 235, 0);
@@ -1535,10 +1541,15 @@ static void sp_shape(lv_color_t *b, const float *lx, const float *ly, int n,
 }
 
 static void splash_paint(lv_color_t *b) {
+    // Every coordinate below was picked against the 466 px panel. K maps them onto
+    // whatever this board actually has; without it the whole painting bunches into
+    // the top-left corner of a larger screen.
+    const float K = (float)SCREEN_W / (float)UI_DESIGN_W;
     // --- sky: vertical gradient from deep night down to a warm horizon ---
     struct { int y; uint32_t rgb; } stop[] = {
-        {   0, 0x050A1E }, { 120, 0x0C2350 }, { 230, 0x1B4E8C },
-        { 320, 0x3E82B8 }, { 384, 0xE79A55 }, { 430, 0xF8C87C }, { 466, 0xFFDCA8 },
+        {           0, 0x050A1E }, { (int)(120*K), 0x0C2350 }, { (int)(230*K), 0x1B4E8C },
+        { (int)(320*K), 0x3E82B8 }, { (int)(384*K), 0xE79A55 }, { (int)(430*K), 0xF8C87C },
+        {    SCREEN_H, 0xFFDCA8 },
     };
     const int nstop = (int)(sizeof(stop) / sizeof(stop[0]));
     for (int y = 0; y < SCREEN_H; ++y) {
@@ -1557,9 +1568,10 @@ static void splash_paint(lv_color_t *b) {
         rnd = rnd * 1664525u + 1013904223u;
         const int sx = (int)((rnd >> 8) % SCREEN_W);
         rnd = rnd * 1664525u + 1013904223u;
-        const int sy = (int)((rnd >> 8) % 250);
+        const int starBand = (int)(250 * K);
+        const int sy = (int)((rnd >> 8) % starBand);
         const int a  = 40 + (int)((rnd >> 4) % 150);
-        sp_blend(b, sx, sy, lv_color_hex(0xFFFFFF), a * (250 - sy) / 250);
+        sp_blend(b, sx, sy, lv_color_hex(0xFFFFFF), a * (starBand - sy) / starBand);
     }
 
     // --- clouds: overlapping feathered discs, lit warm from below ---
@@ -1569,43 +1581,48 @@ static void splash_paint(lv_color_t *b) {
         { 210, 392, 30, 120, 0xFFD9AE }, { 250, 398, 24, 110, 0xFFE4C4 }, { 172, 398, 22, 110, 0xFFD2A4 },
     };
     for (unsigned i = 0; i < sizeof(cloud) / sizeof(cloud[0]); ++i)
-        sp_disc(b, cloud[i].x, cloud[i].y, cloud[i].r, lv_color_hex(cloud[i].c), cloud[i].a, 16.0f);
+        sp_disc(b, cloud[i].x * K, cloud[i].y * K, cloud[i].r * K,
+                lv_color_hex(cloud[i].c), cloud[i].a, 16.0f * K);
 
     // --- radar scope, sitting in the darker upper sky for contrast ---
-    const float scx = SCREEN_CX, scy = 196.0f;
+    const float scx = SCREEN_CX, scy = 196.0f * K;
+    const float scR = 132.0f * K;
     const lv_color_t cyan = lv_color_hex(0x35E8FF);
-    sp_disc(b, scx, scy, 132.0f, lv_color_hex(0x03121F), 120, 10.0f);   // scope glass
-    for (int i = 1; i <= 3; ++i) sp_ring(b, scx, scy, 44.0f * i, 1.6f, cyan, 150);
-    sp_ring(b, scx, scy, 132.0f, 2.4f, cyan, 200);
+    sp_disc(b, scx, scy, scR, lv_color_hex(0x03121F), 120, 10.0f * K);   // scope glass
+    for (int i = 1; i <= 3; ++i) sp_ring(b, scx, scy, 44.0f * K * i, 1.6f * K, cyan, 150);
+    sp_ring(b, scx, scy, scR, 2.4f * K, cyan, 200);
     for (int i = 0; i < 4; ++i) {                                        // crosshair
         const float a = (float)i * (float)M_PI / 2.0f;
-        for (float d = 6; d < 132; d += 1.0f)
+        for (float d = 6 * K; d < scR; d += 1.0f)
             sp_blend(b, (int)(scx + cosf(a) * d), (int)(scy + sinf(a) * d), cyan, 60);
     }
 
     // --- sweep wedge, trailing behind the leading edge ---
     const float lead = -0.62f, span = 1.15f;
-    for (int y = (int)(scy - 133); y <= (int)(scy + 133); ++y) {
-        for (int x = (int)(scx - 133); x <= (int)(scx + 133); ++x) {
+    const float scRo = scR + 1.0f;
+    for (int y = (int)(scy - scRo); y <= (int)(scy + scRo); ++y) {
+        for (int x = (int)(scx - scRo); x <= (int)(scx + scRo); ++x) {
             const float dx = x + 0.5f - scx, dy = y + 0.5f - scy;
             const float d = sqrtf(dx * dx + dy * dy);
-            if (d > 131.0f) continue;
+            if (d > scR - 1.0f) continue;
             float da = lead - atan2f(dy, dx);
             while (da < 0) da += 2.0f * (float)M_PI;
             while (da > 2.0f * (float)M_PI) da -= 2.0f * (float)M_PI;
             if (da > span) continue;
-            const int a = (int)(120.0f * (1.0f - da / span) * (1.0f - d / 131.0f * 0.35f));
+            const int a = (int)(120.0f * (1.0f - da / span) * (1.0f - d / (scR - 1.0f) * 0.35f));
             sp_blend(b, x, y, lv_color_hex(0x2BFF9E), a);
         }
     }
     const float blip[][2] = { {-58, -34}, {40, -62}, {74, 30}, {-30, 66} };
     for (unsigned i = 0; i < sizeof(blip) / sizeof(blip[0]); ++i) {
-        sp_disc(b, scx + blip[i][0], scy + blip[i][1], 6.0f, lv_color_hex(0x2BFF9E), 70, 5.0f);
-        sp_disc(b, scx + blip[i][0], scy + blip[i][1], 2.4f, lv_color_hex(0xCFFFE6), 255, 1.2f);
+        sp_disc(b, scx + blip[i][0] * K, scy + blip[i][1] * K, 6.0f * K,
+                lv_color_hex(0x2BFF9E), 70, 5.0f * K);
+        sp_disc(b, scx + blip[i][0] * K, scy + blip[i][1] * K, 2.4f * K,
+                lv_color_hex(0xCFFFE6), 255, 1.2f * K);
     }
 
     // --- the aircraft: airliner planform, banking across the scope ---
-    const float rot = -0.34f, sc = 1.32f, px_ = scx - 6, py_ = scy + 4;
+    const float rot = -0.34f, sc = 1.32f * K, px_ = scx - 6 * K, py_ = scy + 4 * K;
     const lv_color_t body = lv_color_hex(0xF2F7FF), shade = lv_color_hex(0x9FB6D4);
     const float wingL[6] = {  8,  -6, -30, -22,  -2,   6 };
     const float wingLy[6]= { -4, -10, -54, -56, -12,  -4 };
@@ -1639,8 +1656,9 @@ static void splash_paint(lv_color_t *b) {
         for (int x = 0; x < SCREEN_W; ++x) {
             const float dx = x - SCREEN_CX, dy = y - SCREEN_CY;
             const float d = sqrtf(dx * dx + dy * dy);
-            if (d < 196.0f) continue;
-            int a = (int)((d - 196.0f) / 37.0f * 255.0f);
+            const float vIn = 196.0f * K, vFade = 37.0f * K;
+            if (d < vIn) continue;
+            int a = (int)((d - vIn) / vFade * 255.0f);
             if (a > 255) a = 255;
             sp_blend(b, x, y, lv_color_black(), a);
         }
@@ -1788,8 +1806,8 @@ void ui_create(void) {
     for (int i = 0; i < 4; ++i) {
         s_hudBars[i] = lv_obj_create(s_hudWifi);
         lv_obj_remove_style_all(s_hudBars[i]);
-        lv_obj_set_size(s_hudBars[i], 3, (lv_coord_t)(4 + i * 3));   // 4, 7, 10, 13 px tall
-        lv_obj_align(s_hudBars[i], LV_ALIGN_BOTTOM_LEFT, (lv_coord_t)(i * 5), 0);
+        lv_obj_set_size(s_hudBars[i], UI_S(3), (lv_coord_t)UI_S(4 + i * 3));   // 4, 7, 10, 13 px at 466
+        lv_obj_align(s_hudBars[i], LV_ALIGN_BOTTOM_LEFT, (lv_coord_t)UI_S(i * 5), 0);
         lv_obj_set_style_radius(s_hudBars[i], 1, 0);
         lv_obj_set_style_bg_color(s_hudBars[i], UI_INK, 0);
         lv_obj_set_style_bg_opa(s_hudBars[i], LV_OPA_COVER, 0);
@@ -1831,7 +1849,10 @@ void ui_create(void) {
     lv_obj_t *lp = make_round_panel(s_tileList);
     s_listTitle = make_tile_title(lp, "AIRCRAFT");
     s_list = lv_list_create(lp);
-    lv_obj_set_size(s_list, s_bigText ? 340 : 300, 372);   // wider rows so big-font distances don't clip
+    // Scaled: this stayed 300 px wide on a larger panel while the font stepped up a
+    // tier, so the distance column clipped. The UI_S() pass missed it because the width
+    // is a ternary rather than a plain literal.
+    lv_obj_set_size(s_list, UI_S(s_bigText ? 340 : 300), UI_S(372));
     lv_obj_align(s_list, LV_ALIGN_CENTER, UI_S(0), UI_S(22));
     lv_obj_set_style_bg_opa(s_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_list, 0, 0);
@@ -2012,29 +2033,29 @@ void ui_create(void) {
     lv_obj_align(s_fcCondition, LV_ALIGN_TOP_MID, UI_S(0), UI_S(105));
 
     const char *metricNames[3] = { "FEELS", "HUMIDITY", "WIND" };
-    const int colX[3] = { -122, 0, 122 };
+    const int colX[3] = { UI_S(-122), 0, UI_S(122) };
     for (int i = 0; i < 3; ++i) {
         s_fcMetricName[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcMetricName[i], F12(), 0);
         lv_obj_set_style_text_color(s_fcMetricName[i], UI_DIM, 0);
         lv_label_set_text(s_fcMetricName[i], metricNames[i]);
-        lv_obj_align(s_fcMetricName[i], LV_ALIGN_TOP_MID, colX[i], 150);
+        lv_obj_align(s_fcMetricName[i], LV_ALIGN_TOP_MID, colX[i], UI_S(150));
         s_fcMetricValue[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcMetricValue[i], F16(), 0);
         lv_obj_set_style_text_color(s_fcMetricValue[i], UI_INK, 0);
         lv_label_set_text(s_fcMetricValue[i], "-");
-        lv_obj_align(s_fcMetricValue[i], LV_ALIGN_TOP_MID, colX[i], 170);
+        lv_obj_align(s_fcMetricValue[i], LV_ALIGN_TOP_MID, colX[i], UI_S(170));
 
         s_fcDay[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcDay[i], F16(), 0);
         lv_obj_set_style_text_color(s_fcDay[i], UI_GREEN, 0);
         lv_label_set_text(s_fcDay[i], "---");
-        lv_obj_align(s_fcDay[i], LV_ALIGN_TOP_MID, colX[i], 212);
+        lv_obj_align(s_fcDay[i], LV_ALIGN_TOP_MID, colX[i], UI_S(212));
 
         s_fcDayIcon[i] = lv_obj_create(wp);
         weather_icon_attach(s_fcDayIcon[i]);
         lv_obj_set_size(s_fcDayIcon[i], UI_S(44), UI_S(44));
-        lv_obj_align(s_fcDayIcon[i], LV_ALIGN_TOP_MID, colX[i], 230);
+        lv_obj_align(s_fcDayIcon[i], LV_ALIGN_TOP_MID, colX[i], UI_S(230));
         s_fcDayCondition[i] = lv_label_create(wp);
         lv_obj_set_width(s_fcDayCondition[i], UI_S(116));
         lv_obj_set_style_text_font(s_fcDayCondition[i], F12(), 0);
@@ -2042,17 +2063,17 @@ void ui_create(void) {
         lv_obj_set_style_text_align(s_fcDayCondition[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(s_fcDayCondition[i], LV_LABEL_LONG_WRAP);
         lv_label_set_text(s_fcDayCondition[i], "");
-        lv_obj_align(s_fcDayCondition[i], LV_ALIGN_TOP_MID, colX[i], 276);
+        lv_obj_align(s_fcDayCondition[i], LV_ALIGN_TOP_MID, colX[i], UI_S(276));
         s_fcDayTemp[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcDayTemp[i], F14(), 0);
         lv_obj_set_style_text_color(s_fcDayTemp[i], UI_INK, 0);
         lv_label_set_text(s_fcDayTemp[i], "");
-        lv_obj_align(s_fcDayTemp[i], LV_ALIGN_TOP_MID, colX[i], 304);
+        lv_obj_align(s_fcDayTemp[i], LV_ALIGN_TOP_MID, colX[i], UI_S(304));
         s_fcDayRain[i] = lv_label_create(wp);
         lv_obj_set_style_text_font(s_fcDayRain[i], F12(), 0);
         lv_obj_set_style_text_color(s_fcDayRain[i], lv_color_hex(0x4DDCFF), 0);
         lv_label_set_text(s_fcDayRain[i], "");
-        lv_obj_align(s_fcDayRain[i], LV_ALIGN_TOP_MID, colX[i], 328);
+        lv_obj_align(s_fcDayRain[i], LV_ALIGN_TOP_MID, colX[i], UI_S(328));
     }
     s_fcUpdated = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcUpdated, F12(), 0);
@@ -2191,7 +2212,10 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_clockSec, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_clockSec, UI_GREEN, 0);
     lv_label_set_text(s_clockSec, "");
-    lv_obj_align(s_clockSec, LV_ALIGN_CENTER, UI_S(84), UI_S(-62));
+    // Anchored to the time text, not the panel. montserrat_48 is LVGL's largest built-in
+    // font so the digits cannot grow with the screen; scaling this offset instead left the
+    // meridiem stranded out to the right on a bigger panel.
+    lv_obj_align_to(s_clockSec, s_clockTime, LV_ALIGN_OUT_RIGHT_BOTTOM, UI_S(8), UI_S(-6));
 
     s_clockDate = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockDate, &lv_font_montserrat_16, 0);
@@ -2225,22 +2249,25 @@ void ui_create(void) {
     lv_label_set_text(s_clockCond, "");
     lv_obj_align(s_clockCond, LV_ALIGN_CENTER, UI_S(24), UI_S(46));
 
-    const int clkColX[3] = { -104, 0, 104 };
+    // Scaled: the icons grow with UI_S() but these offsets did not, so on a larger
+    // panel the rows collided. The regex pass that added UI_S() only matched calls
+    // with two literal coordinates, and these pass a variable.
+    const int clkColX[3] = { UI_S(-104), 0, UI_S(104) };
     for (int i = 0; i < 3; ++i) {
         s_clockDay[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDay[i], &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(s_clockDay[i], UI_GREEN, 0);
         lv_label_set_text(s_clockDay[i], "");
-        lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], 90);
+        lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], UI_S(90));
         s_clockDayIcon[i] = lv_obj_create(cp);
         weather_icon_attach(s_clockDayIcon[i]);
         lv_obj_set_size(s_clockDayIcon[i], UI_S(38), UI_S(38));
-        lv_obj_align(s_clockDayIcon[i], LV_ALIGN_CENTER, clkColX[i], 119);
+        lv_obj_align(s_clockDayIcon[i], LV_ALIGN_CENTER, clkColX[i], UI_S(119));
         s_clockDayTemp[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDayTemp[i], &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(s_clockDayTemp[i], UI_SOFT, 0);
         lv_label_set_text(s_clockDayTemp[i], "");
-        lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], 146);
+        lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], UI_S(146));
     }
     lv_timer_create(clock_tick_cb, 1000, nullptr);
 
