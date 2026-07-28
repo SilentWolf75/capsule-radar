@@ -1845,6 +1845,18 @@ void ui_create(void) {
     lv_label_set_text(s_hudDate, "");
     lv_obj_align(s_hudDate, LV_ALIGN_TOP_MID, UI_S(0), UI_S(70));
 
+    // Keep the chrome above the aircraft layer. Contacts near the top of the scope drew
+    // their callsign straight through the signal bars and count, leaving both unreadable;
+    // the wider panel makes that collision more likely, not less, because labels are
+    // longer. The zoom button has the same problem with traffic near the bottom.
+    lv_obj_move_foreground(s_hudWifi);
+    for (int i = 0; i < 4; ++i) lv_obj_move_foreground(s_hudBars[i]);
+    lv_obj_move_foreground(s_hudCount);
+    lv_obj_move_foreground(s_hudClock);
+    lv_obj_move_foreground(s_hudDate);
+    if (s_hudBatt) lv_obj_move_foreground(s_hudBatt);
+    if (s_hudGps)  lv_obj_move_foreground(s_hudGps);
+
     // --- list tile (circular panel, clipped to the round screen) ---
     lv_obj_t *lp = make_round_panel(s_tileList);
     s_listTitle = make_tile_title(lp, "AIRCRAFT");

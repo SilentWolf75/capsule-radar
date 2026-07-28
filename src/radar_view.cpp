@@ -639,6 +639,10 @@ static void draw_offrange(lv_draw_ctx_t *d, const AcDraw &ac) {
 }
 
 static void ac_draw_cb(lv_event_t *e) {
+    // Glyphs, labels and markers are all drawn from coordinates chosen against the 466 px
+    // panel. Rotation was applied but never scale, so on a larger screen the aircraft and
+    // their labels stayed the same physical size and read as tiny against a wider scope.
+    const float gk = (float)SCREEN_W / (float)UI_DESIGN_W;
     lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
     const bool drg = orb();
     int balls = 0, arrows = 0;
@@ -725,8 +729,8 @@ static void ac_draw_cb(lv_event_t *e) {
                 for (int p = 0; p < sh.nParts; ++p) {
                     const AcPoly &poly = sh.parts[p];
                     for (int i = 0; i < poly.n; ++i) {
-                        const float x = poly.x[i] * c - poly.y[i] * s;
-                        const float y = poly.x[i] * s + poly.y[i] * c;
+                        const float x = (poly.x[i] * c - poly.y[i] * s) * gk;
+                        const float y = (poly.x[i] * s + poly.y[i] * c) * gk;
                         pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
                         pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
                     }
@@ -736,15 +740,15 @@ static void ac_draw_cb(lv_event_t *e) {
                     lv_draw_arc_dsc_t r;
                     lv_draw_arc_dsc_init(&r);
                     r.color = ac.color;
-                    r.width = 2;
+                    r.width = (lv_coord_t)(2 * gk);
                     r.opa = 150;
-                    lv_draw_arc(d, &r, &ac.pos, sh.rotorR, 0, 360);
+                    lv_draw_arc(d, &r, &ac.pos, (lv_coord_t)(sh.rotorR * gk), 0, 360);
                 }
             } else {
                 lv_point_t pts[4];
                 for (int i = 0; i < 4; ++i) {
-                    const float x = GX[i] * c - GY[i] * s;
-                    const float y = GX[i] * s + GY[i] * c;
+                    const float x = (GX[i] * c - GY[i] * s) * gk;
+                    const float y = (GX[i] * s + GY[i] * c) * gk;
                     pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
                     pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
                 }
@@ -753,8 +757,8 @@ static void ac_draw_cb(lv_event_t *e) {
             if (ac.emergency) {
                 lv_draw_arc_dsc_t h;
                 lv_draw_arc_dsc_init(&h);
-                h.color = COL_EMERG; h.width = 2; h.opa = 200;
-                lv_draw_arc(d, &h, &ac.pos, 16, 0, 360);
+                h.color = COL_EMERG; h.width = (lv_coord_t)(2 * gk); h.opa = 200;
+                lv_draw_arc(d, &h, &ac.pos, (lv_coord_t)(16 * gk), 0, 360);
             }
             if (ac.military || s_milPreview) {
                 // Targeting-style corner brackets: four short L pairs at the corners of
@@ -762,8 +766,8 @@ static void ac_draw_cb(lv_event_t *e) {
                 // from the emergency circle even at a glance.
                 lv_draw_line_dsc_t m;
                 lv_draw_line_dsc_init(&m);
-                m.color = MIL_COLOR; m.width = 2; m.opa = 225;
-                const lv_coord_t R = 17, L = 6;
+                m.color = MIL_COLOR; m.width = (lv_coord_t)(2 * gk); m.opa = 225;
+                const lv_coord_t R = (lv_coord_t)(17 * gk), L = (lv_coord_t)(6 * gk);
                 const lv_coord_t xs[2] = { (lv_coord_t)(ac.pos.x - R), (lv_coord_t)(ac.pos.x + R) };
                 const lv_coord_t ys[2] = { (lv_coord_t)(ac.pos.y - R), (lv_coord_t)(ac.pos.y + R) };
                 for (int iy = 0; iy < 2; ++iy) {
@@ -791,7 +795,7 @@ static void ac_draw_cb(lv_event_t *e) {
                 lv_draw_arc(d, &sr, &ac.pos, 23, 0, 360);
             } else {
                 sr.color = ac.emergency ? COL_EMERG : s_cInk;
-                lv_draw_arc(d, &sr, &ac.pos, 19, 0, 360);
+                lv_draw_arc(d, &sr, &ac.pos, (lv_coord_t)(19 * gk), 0, 360);
             }
         }
 
@@ -799,16 +803,20 @@ static void ac_draw_cb(lv_event_t *e) {
         if (!drg) {
             lv_draw_label_dsc_t lc;
             lv_draw_label_dsc_init(&lc);
-            lc.font = s_bigText ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+            // Bigger panel gets a bigger label font as well as a scaled offset -- keeping
+            // 14 px text beside a glyph half again as large reads as an afterthought.
+            const bool bigPanel = (SCREEN_W >= 600);
+            lc.font = (s_bigText || bigPanel) ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
             lc.color = s_cInk;
-            lv_area_t a1 = { (lv_coord_t)(ac.pos.x + 12), (lv_coord_t)(ac.pos.y - 14),
-                             (lv_coord_t)(ac.pos.x + 168), (lv_coord_t)(ac.pos.y + 4) };
+            lv_area_t a1 = { (lv_coord_t)(ac.pos.x + 12 * gk), (lv_coord_t)(ac.pos.y - 14 * gk),
+                             (lv_coord_t)(ac.pos.x + 168 * gk), (lv_coord_t)(ac.pos.y + 4 * gk) };
             if (ac.call[0]) lv_draw_label(d, &lc, &a1, ac.call, NULL);
             lv_draw_label_dsc_t la;
             lv_draw_label_dsc_init(&la);
-            la.font = s_bigText ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+            la.font = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
             la.color = ac.color;
-            lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 4), a1.x2, (lv_coord_t)(ac.pos.y + 26) };
+            lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 4 * gk),
+                             a1.x2, (lv_coord_t)(ac.pos.y + 26 * gk) };
             if (ac.altTxt[0]) lv_draw_label(d, &la, &a2, ac.altTxt, NULL);
         }
     }
