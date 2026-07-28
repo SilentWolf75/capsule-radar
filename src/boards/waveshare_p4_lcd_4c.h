@@ -106,10 +106,15 @@
 // buffer means far fewer chunks per frame, and chunk setup -- not pixel work -- is what
 // caps the frame rate here. 160 lines is 720*160*2 = 230 KB.
 #define LVGL_BUF_LINES      40
-// A shorter, coarser trail. The wedge is the dominant per-frame cost and it scales with
-// area: at this radius a 55 deg trail sweeps 54k pixels of alpha blending every frame.
-#define SWEEP_TRAIL_DEG     36.0f
-#define SWEEP_TRAIL_STEPS   12
+// Trail length left at the default 55 deg. Shortening it to 36 did make frames ~25%
+// cheaper, but it looked worse on the panel: the trail works as motion blur, and cutting
+// it exposed each individual step. Same lesson as the S3 -- the measurement improved and
+// the appearance did not.
+//
+// Step limit kept at what this board was doing before: 17.6 px at the rim is the old
+// 3 deg. Reducing it to 11 px bought smoother arithmetic and a slower, more obviously
+// stepped sweep.
+#define SWEEP_MAX_STEP_PX   17.6f
 #define I2C_ADDR_IMU        -1
 #define I2C_ADDR_RTC        -1
 #define I2C_ADDR_PMIC       -1
