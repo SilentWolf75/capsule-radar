@@ -1466,6 +1466,47 @@ void ui_show_view(int idx) {
 // it is freed the moment the splash fades out.
 static lv_color_t *s_splashBuf = nullptr;
 
+// Splash artwork is a baked JPEG rather than per-pixel polygon painting. The procedural
+// version could draw the scope and sky convincingly but never a believable aircraft --
+// three attempts at a vector silhouette all read badly on the real panel. Flash is
+// 16-32 MB here and TJpg_Decoder is already linked, so a ~50 KB image costs nothing.
+// splash_paint() below stays as the fallback (and for the SDL simulator, which has no
+// decoder): if the image fails to decode the splash still comes up.
+#if defined(ESP_PLATFORM)
+#include <TJpg_Decoder.h>
+#if SCREEN_W >= 600
+#include "boards/splash_720.h"
+#define SPLASH_JPG      kSplashJpg720
+#else
+#include "boards/splash_466.h"
+#define SPLASH_JPG      kSplashJpg466
+#endif
+static lv_color_t *s_splashDst = nullptr;
+static bool splash_jpg_out(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bmp) {
+    if (!s_splashDst) return false;
+    for (int j = 0; j < h; ++j) {
+        const int yy = y + j;
+        if (yy < 0 || yy >= SCREEN_H) continue;
+        for (int i = 0; i < w; ++i) {
+            const int xx = x + i;
+            if (xx < 0 || xx >= SCREEN_W) continue;
+            s_splashDst[yy * SCREEN_W + xx].full = bmp[j * w + i];
+        }
+    }
+    return true;
+}
+static bool splash_decode(lv_color_t *dst) {
+    s_splashDst = dst;
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setSwapBytes(false);
+    TJpgDec.setCallback(splash_jpg_out);
+    const JRESULT r = TJpgDec.drawJpg(0, 0, SPLASH_JPG, sizeof(SPLASH_JPG));
+    s_splashDst = nullptr;
+    if (r != JDR_OK) Serial.printf("[splash] jpeg decode failed: %d\n", (int)r);
+    return r == JDR_OK;
+}
+#endif
+
 static inline void sp_blend(lv_color_t *b, int x, int y, lv_color_t c, int a) {
     if (a <= 0 || x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
     lv_color_t *p = &b[y * SCREEN_W + x];
@@ -1688,39 +1729,49 @@ void ui_splash_show(void) {
     // text over black rather than failing to boot.
     s_splashBuf = (lv_color_t *)heap_caps_malloc((size_t)SCREEN_W * SCREEN_H * sizeof(lv_color_t),
                                                  MALLOC_CAP_SPIRAM);
+    bool baked = false;
     if (s_splashBuf) {
+#if defined(ESP_PLATFORM)
+        baked = splash_decode(s_splashBuf);
+        if (!baked) splash_paint(s_splashBuf);
+#else
         splash_paint(s_splashBuf);
+#endif
         lv_obj_t *cv = lv_canvas_create(cont);
         lv_canvas_set_buffer(cv, s_splashBuf, SCREEN_W, SCREEN_H, LV_IMG_CF_TRUE_COLOR);
         lv_obj_center(cv);
     }
 
-    // Title, with a dark plate behind it so it stays legible over the horizon glow.
-    lv_obj_t *plate = lv_obj_create(cont);
-    lv_obj_remove_style_all(plate);
-    lv_obj_set_size(plate, UI_S(306), UI_S(112));
-    lv_obj_align(plate, LV_ALIGN_CENTER, UI_S(0), UI_S(132));
-    lv_obj_set_style_radius(plate, 18, 0);
-    lv_obj_set_style_bg_color(plate, lv_color_hex(0x02070F), 0);
-    lv_obj_set_style_bg_opa(plate, 180, 0);
-    lv_obj_set_style_border_color(plate, lv_color_hex(0x35E8FF), 0);
-    lv_obj_set_style_border_opa(plate, 90, 0);
-    lv_obj_set_style_border_width(plate, 1, 0);
-    lv_obj_clear_flag(plate, LV_OBJ_FLAG_SCROLLABLE);
+    // The baked artwork carries its own title plate, so these are only drawn when we fell
+    // back to painting the splash procedurally. Drawing both would double the wordmark.
+    if (!baked) {
+        // Title, with a dark plate behind it so it stays legible over the horizon glow.
+        lv_obj_t *plate = lv_obj_create(cont);
+        lv_obj_remove_style_all(plate);
+        lv_obj_set_size(plate, UI_S(306), UI_S(112));
+        lv_obj_align(plate, LV_ALIGN_CENTER, UI_S(0), UI_S(132));
+        lv_obj_set_style_radius(plate, 18, 0);
+        lv_obj_set_style_bg_color(plate, lv_color_hex(0x02070F), 0);
+        lv_obj_set_style_bg_opa(plate, 180, 0);
+        lv_obj_set_style_border_color(plate, lv_color_hex(0x35E8FF), 0);
+        lv_obj_set_style_border_opa(plate, 90, 0);
+        lv_obj_set_style_border_width(plate, 1, 0);
+        lv_obj_clear_flag(plate, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = lv_label_create(cont);
-    lv_label_set_text(title, "SKYGLASS");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xEAF8FF), 0);
-    lv_obj_set_style_text_letter_space(title, 4, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, UI_S(0), UI_S(122));
+        lv_obj_t *title = lv_label_create(cont);
+        lv_label_set_text(title, "SKYGLASS");
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(0xEAF8FF), 0);
+        lv_obj_set_style_text_letter_space(title, 4, 0);
+        lv_obj_align(title, LV_ALIGN_CENTER, UI_S(0), UI_S(122));
 
-    lv_obj_t *sub = lv_label_create(cont);
-    lv_label_set_text(sub, "LIVE AIRSPACE MONITOR");
-    lv_obj_set_style_text_font(sub, F12(), 0);
-    lv_obj_set_style_text_color(sub, lv_color_hex(0x63D8FF), 0);
-    lv_obj_set_style_text_letter_space(sub, 2, 0);
-    lv_obj_align(sub, LV_ALIGN_CENTER, UI_S(0), UI_S(152));
+        lv_obj_t *sub = lv_label_create(cont);
+        lv_label_set_text(sub, "LIVE AIRSPACE MONITOR");
+        lv_obj_set_style_text_font(sub, F12(), 0);
+        lv_obj_set_style_text_color(sub, lv_color_hex(0x63D8FF), 0);
+        lv_obj_set_style_text_letter_space(sub, 2, 0);
+        lv_obj_align(sub, LV_ALIGN_CENTER, UI_S(0), UI_S(152));
+    }
 
     // On the plate, not the bezel: at the bottom of the screen this sat on the horizon
     // glow and was effectively invisible.
