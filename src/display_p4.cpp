@@ -21,6 +21,7 @@
 #include <esp_ldo_regulator.h>
 #include <driver/ledc.h>
 #include <esp_heap_caps.h>
+#include <esp_cache.h>
 #include "display_p4.h"
 
 static esp_lcd_dsi_bus_handle_t  s_bus   = nullptr;
@@ -104,11 +105,21 @@ bool display_p4_begin(void) {
     // intuitive order, and what this driver did initially -- left the panel lit but
     // blank. The vendor's Arduino_ESP32DSIPanel::begin() creates the DPI panel, then
     // pushes the vendor sequence, then calls panel_init; this mirrors that exactly.
+    // Check every write. The vendor wraps each in ESP_ERROR_CHECK; silently ignoring
+    // failures here means a panel that never gets configured and simply stays blank.
+    int txFail = 0;
     for (size_t i = 0; i < sizeof(kPanelInit) / sizeof(kPanelInit[0]); ++i) {
         const uint8_t v = kPanelInit[i].val;
-        esp_lcd_panel_io_tx_param(s_io, kPanelInit[i].reg, &v, 1);
+        const esp_err_t e = esp_lcd_panel_io_tx_param(s_io, kPanelInit[i].reg, &v, 1);
+        if (e != ESP_OK) {
+            if (txFail < 3) Serial.printf("[p4lcd] init[%u] reg 0x%02X failed: %s\n",
+                                          (unsigned)i, kPanelInit[i].reg, esp_err_to_name(e));
+            ++txFail;
+        }
         if (kPanelInit[i].delay_ms) delay(kPanelInit[i].delay_ms);
     }
+    Serial.printf("[p4lcd] init sequence: %u commands, %d failed\n",
+                  (unsigned)(sizeof(kPanelInit) / sizeof(kPanelInit[0])), txFail);
 
     if (esp_lcd_panel_init(s_panel) != ESP_OK) {
         Serial.println("[p4lcd] panel init failed");

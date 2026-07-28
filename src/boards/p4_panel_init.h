@@ -1,13 +1,16 @@
 #pragma once
-// MIPI-DSI panel init sequence for the Waveshare 4" 720x720 round display ("4INCH-DSI").
+// MIPI-DSI init sequence for the Waveshare 4" 720x720 round panel.
 //
 // TRANSCRIBED VERBATIM from the vendor demo:
 //   ESP32-P4-WIFI6-Touch-LCD-XC-Demo.zip
-//     -> Arduino/libraries/displays/displays_config.h : vendor_specific_init_default
+//     -> Arduino/libraries/displays/displays_config.h
+//        the CURRENT_SCREEN == SCREEN_4INCH_DSI branch
 //
-// Do not hand-edit. If the panel misbehaves, re-extract from the vendor demo rather
-// than tweaking values here -- this is the known-good reference, and an ESPHome user on
-// this same board lost an evening to substituting another panel's sequence.
+// The file holds TWO arrays both named vendor_specific_init_default, one per #if branch:
+// the 3.4" 800x800 panel first, then this one. Taking the first match gets the wrong
+// panel's registers and produces a lit but permanently blank screen -- which is exactly
+// what happened before this was corrected. Re-extract from the 4INCH branch, not by
+// searching for the symbol name.
 //
 // Format: register, single data byte, delay in ms to wait afterwards.
 struct PanelReg { uint8_t reg; uint8_t val; uint16_t delay_ms; };
@@ -39,7 +42,7 @@ static const PanelReg kPanelInit[] = {
     { 0x3D, 0xFF, 0 },
     { 0x3E, 0xFF, 0 },
     { 0x3F, 0xFF, 0 },
-    { 0x40, 0x00, 0 },
+    { 0x40, 0x04, 0 },
     { 0x41, 0x64, 0 },
     { 0x42, 0xC7, 0 },
     { 0x43, 0x18, 0 },
