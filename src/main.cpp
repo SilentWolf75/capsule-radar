@@ -851,7 +851,17 @@ static void handleRoot() {
         "otherwise reach the device with no cable in reach. "
         "<a href=/update style='color:#9affc8'>Upload a .bin manually</a></div></div>"
         "<div class=card><div class=t>Network</div>"
-        "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
+#if !BOARD_HAS_WIFIMANAGER
+        // Boards without WiFiManager have no captive portal, so credential entry has to
+        // live here or there is no way in at all -- which is exactly what happened when
+        // the portal was compiled out for the P4.
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Join a WiFi network. The device reboots to connect.</p>"
+        "<form method=POST action=/wifisave>"
+        "<label>SSID</label><input name=ssid maxlength=32 autocomplete=off>"
+        "<label>Password</label><input name=pass type=password maxlength=63 autocomplete=off>"
+        "<button class=w>Save &amp; connect</button></form>"
+#endif
+        "<p style='color:#9affc8;font-size:13px;margin:8px 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
         "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
         "<p class=ft>Reach me at <code>skyglass.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
@@ -985,6 +995,29 @@ static void handleSave() {
     delay(400);
     ESP.restart();
 }
+
+#if !BOARD_HAS_WIFIMANAGER
+// Store credentials and reboot. Kept behind the same guard as the form: boards with
+// WiFiManager get its portal instead and never reach this.
+static void handleWifiSave() {
+    const String ss = g_web.arg("ssid");
+    const String pw = g_web.arg("pass");
+    if (ss.length()) {
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putString("wifiSsid", ss);
+        p.putString("wifiPass", pw);
+        p.end();
+        Serial.printf("[wifi] saved credentials for %s; rebooting\n", ss.c_str());
+    }
+    g_web.send(200, "text/html",
+        "<meta http-equiv=refresh content='6;url=/'><body style='background:#06100a;color:#1dff86;"
+        "font-family:sans-serif;padding:24px'>Saved. Reconnecting&hellip;<br><br>"
+        "If this page does not come back, rejoin your normal WiFi and open "
+        "<code>skyglass.local</code>.</body>");
+    g_rebootAtMs = millis() + 1200;
+}
+#endif
 
 static void handleWifi() {
     g_web.send(200, "text/html",
@@ -1726,6 +1759,9 @@ void setup() {
     g_web.on("/", handleRoot);
     g_web.on("/save", HTTP_POST, handleSave);
     g_web.on("/wifi", HTTP_POST, handleWifi);
+#if !BOARD_HAS_WIFIMANAGER
+    g_web.on("/wifisave", HTTP_POST, handleWifiSave);
+#endif
     g_web.on("/bright", handleBright);
     g_web.on("/vol", handleVol);
     g_web.on("/alerts", handleAlerts);

@@ -78,9 +78,9 @@ void setBrightness(uint8_t v) { display_p4_backlight(v > 0); }
 void setRotation(uint16_t) {}
 uint16_t rotation() { return 0; }
 
-// Screenshots need the flush path to mirror into a full framebuffer; not wired for DSI.
-// Returning nullptr leaves /shot.bmp reporting failure rather than serving garbage.
-const uint16_t *captureFrame() { return nullptr; }
+// The DPI panel owns a full framebuffer, so /shot.bmp can read it back directly --
+// simpler than the S3, which has to mirror flushes into a separate buffer.
+const uint16_t *captureFrame() { return display_p4_framebuffer(); }
 
 uint32_t inactiveMs() { return lv_disp_get_inactive_time(nullptr); }
 

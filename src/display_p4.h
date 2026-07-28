@@ -5,5 +5,6 @@
 #include <lvgl.h>
 bool display_p4_begin(void);                 // LDO -> DSI bus -> DBI init -> DPI panel
 void display_p4_backlight(bool on);          // LEDC PWM on PIN_LCD_BL
+const uint16_t *display_p4_framebuffer(void);   // live DPI framebuffer, for /shot.bmp
 void display_p4_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px);
 #endif

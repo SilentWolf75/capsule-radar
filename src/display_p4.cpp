@@ -158,6 +158,19 @@ void display_p4_backlight(bool on) {
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
 
+// Screenshots. The DPI panel's framebuffer *is* what the panel is scanning out, so a
+// capture is just a read of it -- no separate mirror buffer needed as on the S3. The
+// cache has to be invalidated first: LVGL's blits reach PSRAM via DMA, so the CPU's
+// view of that memory is stale until told otherwise.
+const uint16_t *display_p4_framebuffer(void) {
+    if (!s_panel) return nullptr;
+    void *fb = nullptr;
+    if (esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, &fb) != ESP_OK || !fb) return nullptr;
+    esp_cache_msync(fb, (size_t)SCREEN_W * SCREEN_H * sizeof(uint16_t),
+                    ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    return (const uint16_t *)fb;
+}
+
 // LVGL flush. The DPI panel owns its framebuffer, so this is a straight blit; the
 // area is inclusive on both ends in LVGL and exclusive at the end in esp_lcd.
 void display_p4_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px) {
