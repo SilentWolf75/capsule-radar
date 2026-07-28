@@ -1732,9 +1732,18 @@ void setup() {
             WiFi.begin(ss.c_str(), pw.c_str());
             Serial.printf("[wifi] connecting to %s\n", ss.c_str());
         } else {
-            WiFi.mode(WIFI_AP);
-            WiFi.softAP("SkyGlass-Setup");
-            Serial.println("[wifi] no credentials - join 'SkyGlass-Setup' and open 192.168.4.1");
+            // Check the result. On this board the radio is an ESP32-C6 over esp_hosted,
+            // and AP mode is not a given -- if softAP() fails there is simply no network
+            // to join and the setup page is unreachable, which looks identical to the
+            // page being broken.
+            const bool apOk = WiFi.mode(WIFI_AP) && WiFi.softAP("SkyGlass-Setup");
+            if (apOk) {
+                Serial.printf("[wifi] SoftAP up: join 'SkyGlass-Setup', open http://%s/\n",
+                              WiFi.softAPIP().toString().c_str());
+            } else {
+                Serial.println("[wifi] SoftAP FAILED - no setup network. Set credentials over "
+                               "serial instead: send  wifi <ssid> <password>");
+            }
         }
     }
 #endif
@@ -1830,7 +1839,30 @@ void setup() {
     Serial.println("setup done");
 }
 
+// Serial credential entry. Exists because the P4 has no captive portal and its SoftAP
+// may not come up at all; without this there would be no way to get the board onto a
+// network. Format:  wifi <ssid> <password>
+static void pollSerialConfig() {
+    if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (!line.startsWith("wifi ")) return;
+    const int sp = line.indexOf(' ', 5);
+    const String ss = (sp > 0) ? line.substring(5, sp) : line.substring(5);
+    const String pw = (sp > 0) ? line.substring(sp + 1) : String();
+    if (!ss.length()) return;
+    Preferences p;
+    p.begin("capsuleradar", false);
+    p.putString("wifiSsid", ss);
+    p.putString("wifiPass", pw);
+    p.end();
+    Serial.printf("[wifi] stored SSID '%s'; rebooting\n", ss.c_str());
+    delay(300);
+    ESP.restart();
+}
+
 void loop() {
+    pollSerialConfig();
     display::loop();                // drive LVGL (render dirty areas + run timers)
 #if BOARD_HAS_WIFIMANAGER
     g_wm.process();                 // service the WiFi config portal (non-blocking)

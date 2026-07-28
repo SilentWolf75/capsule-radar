@@ -8,8 +8,12 @@
 //
 // Portable half: double-buffered pixel store (same front/back pattern as wx_radar).
 #include <stdint.h>
+#include "config.h"
 
-#define MAP_BG_SIZE 466            // matches the panel; the circle is masked inside it
+// Matches the panel; the circle is masked inside it. This was hardcoded to 466, which
+// on a larger panel drew the basemap as a 466-pixel square parked in the middle of the
+// screen instead of filling the scope.
+#define MAP_BG_SIZE SCREEN_W
 
 void map_bg_begin(void);
 uint16_t *map_bg_back_buffer(void);          // client renders here, then commits
