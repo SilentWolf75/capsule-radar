@@ -7,8 +7,8 @@
 // IDF sequence: power the PHY's LDO, create the DSI bus, create a DBI channel to send
 // the panel's init commands, create the DPI video panel, then hand frames to LVGL.
 //
-// UNVERIFIED AGAINST HARDWARE (the board is not here yet), but the panel-specific data
-// is no longer guesswork: the init sequence and video timings are transcribed from the
+// Brought up on real hardware: DSI reports up, backlight lights, GT9271 touch answers.
+// Init sequence and video timings are transcribed from the
 // vendor demo's own 4INCH-DSI configuration. See docs/PORT_P4.md.
 #include "config.h"
 #if defined(BOARD_WAVESHARE_P4_LCD_4C)
@@ -31,6 +31,19 @@ static esp_ldo_channel_handle_t  s_ldo   = nullptr;
 #include "boards/p4_panel_init.h"   // 197 vendor init registers, transcribed verbatim
 
 bool display_p4_begin(void) {
+    // 0) Reset the panel before talking to it. The vendor passes lcd_rst to the driver,
+    //    which pulses it; going straight to the init sequence leaves the controller in
+    //    whatever state it powered up in.
+    if (PIN_LCD_RST >= 0) {
+        pinMode(PIN_LCD_RST, OUTPUT);
+        digitalWrite(PIN_LCD_RST, HIGH);
+        delay(10);
+        digitalWrite(PIN_LCD_RST, LOW);
+        delay(20);
+        digitalWrite(PIN_LCD_RST, HIGH);
+        delay(120);
+    }
+
     // 1) The DSI PHY is fed by an internal LDO. Without this the whole chain reports
     //    success and the screen stays black -- the exact symptom reported by someone
     //    running this board under ESPHome.
@@ -63,18 +76,16 @@ bool display_p4_begin(void) {
         return false;
     }
 
-    for (size_t i = 0; i < sizeof(kPanelInit) / sizeof(kPanelInit[0]); ++i) {
-        const uint8_t v = kPanelInit[i].val;
-        esp_lcd_panel_io_tx_param(s_io, kPanelInit[i].reg, &v, 1);
-        if (kPanelInit[i].delay_ms) delay(kPanelInit[i].delay_ms);
-    }
-
     // 4) DPI video panel, timings from the board header (the vendor's own values).
     esp_lcd_dpi_panel_config_t dpi_cfg = {};
     dpi_cfg.virtual_channel     = 0;
     dpi_cfg.dpi_clk_src         = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
     dpi_cfg.dpi_clock_freq_mhz  = (uint32_t)(DSI_PCLK_HZ / 1000000UL);
     dpi_cfg.pixel_format        = LCD_COLOR_PIXEL_FORMAT_RGB565;
+    // Also set the in/out formats. Leaving them zero left the DPI panel with an
+    // unspecified format, which is one way to get a lit panel showing nothing.
+    dpi_cfg.in_color_format     = LCD_COLOR_FMT_RGB565;
+    dpi_cfg.out_color_format    = LCD_COLOR_FMT_RGB565;
     dpi_cfg.num_fbs             = 1;
     dpi_cfg.video_timing.h_size = SCREEN_W;
     dpi_cfg.video_timing.v_size = SCREEN_H;
@@ -89,6 +100,16 @@ bool display_p4_begin(void) {
         Serial.println("[p4lcd] dpi panel create failed");
         return false;
     }
+    // Init registers go out AFTER the DPI panel exists. Sending them first -- the
+    // intuitive order, and what this driver did initially -- left the panel lit but
+    // blank. The vendor's Arduino_ESP32DSIPanel::begin() creates the DPI panel, then
+    // pushes the vendor sequence, then calls panel_init; this mirrors that exactly.
+    for (size_t i = 0; i < sizeof(kPanelInit) / sizeof(kPanelInit[0]); ++i) {
+        const uint8_t v = kPanelInit[i].val;
+        esp_lcd_panel_io_tx_param(s_io, kPanelInit[i].reg, &v, 1);
+        if (kPanelInit[i].delay_ms) delay(kPanelInit[i].delay_ms);
+    }
+
     if (esp_lcd_panel_init(s_panel) != ESP_OK) {
         Serial.println("[p4lcd] panel init failed");
         return false;
@@ -120,7 +141,9 @@ void display_p4_backlight(bool on) {
         ledc_channel_config(&c);
         inited = true;
     }
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, on ? 255 : 0);
+    // ACTIVE LOW. The vendor test defines TEST_LCD_BK_LIGHT_ON_LEVEL (0), so driving the
+    // pin high — the obvious reading of "on" — is what keeps the panel dark.
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, on ? 0 : 255);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
 

@@ -17,10 +17,54 @@
 #include <time.h>
 #include "display.h"
 #include "display_p4.h"
+#include "touch_gt911.h"
+#include "ui.h"
+#include <esp_heap_caps.h>
 
 namespace display {
 
-bool begin() { return display_p4_begin(); }
+// Mirrors what display.cpp does on the S3. Bringing up the DSI panel alone was not
+// enough: main.cpp expects display::begin() to leave LVGL initialised, a display driver
+// registered, touch attached and the UI built. Without that the panel powers on and
+// stays black, which is exactly what the first flash did.
+static lv_disp_draw_buf_t s_dbuf;
+static lv_disp_drv_t      s_ddrv;
+static lv_indev_drv_t     s_idrv;
+static lv_color_t        *s_buf = nullptr;
+
+bool begin() {
+    if (!display_p4_begin()) {
+        Serial.println("[p4] DSI bring-up failed");
+        return false;
+    }
+
+    lv_init();
+    const size_t px = (size_t)SCREEN_W * 40;
+    s_buf = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    if (!s_buf) { Serial.println("[p4] draw buffer alloc failed"); return false; }
+    lv_disp_draw_buf_init(&s_dbuf, s_buf, nullptr, px);
+
+    lv_disp_drv_init(&s_ddrv);
+    s_ddrv.hor_res  = SCREEN_W;
+    s_ddrv.ver_res  = SCREEN_H;
+    s_ddrv.flush_cb = display_p4_flush;
+    s_ddrv.draw_buf = &s_dbuf;
+    lv_disp_drv_register(&s_ddrv);
+
+    // Also starts the I2C bus. It has to happen here, before main.cpp probes the codec
+    // and RTC -- nothing else calls Wire.begin() on this board.
+    if (touch_gt911_begin()) {
+        lv_indev_drv_init(&s_idrv);
+        s_idrv.type    = LV_INDEV_TYPE_POINTER;
+        s_idrv.read_cb = touch_gt911_lvgl_read;
+        lv_indev_drv_register(&s_idrv);
+    }
+
+    Serial.printf("[p4] PSRAM free: %u KB\n", (unsigned)(ESP.getFreePsram() / 1024));
+    ui_create();
+    Serial.println("[p4] LVGL ready");
+    return true;
+}
 
 void loop() { lv_timer_handler(); }
 

@@ -23,11 +23,15 @@
 
 static uint8_t s_addr = 0;
 
+// Address-then-read. Note the STOP rather than a repeated START: a bus scan showed the
+// controller answering at 0x5D, but endTransmission(false) made the follow-up read fail
+// with i2cWriteReadNonStop -1 inside the ESP32 core. A full STOP works and the GT911 is
+// happy with it.
 static bool rd(uint16_t reg, uint8_t *buf, size_t n) {
     Wire.beginTransmission(s_addr);
     Wire.write((uint8_t)(reg >> 8));
     Wire.write((uint8_t)(reg & 0xFF));
-    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.endTransmission(true) != 0) return false;
     if (Wire.requestFrom((int)s_addr, (int)n) != (int)n) return false;
     for (size_t i = 0; i < n; ++i) buf[i] = Wire.read();
     return true;
@@ -58,13 +62,32 @@ bool touch_gt911_begin(void) {
     uint8_t id[4] = {0};
     for (int i = 0; i < 2; ++i) {
         s_addr = candidates[i];
-        if (rd(GT911_REG_PRODUCT, id, 4) && id[0] == '9' && id[1] == '1' && id[2] == '1') {
-            Serial.printf("[gt911] found at 0x%02X\n", s_addr);
+        const bool ok = rd(GT911_REG_PRODUCT, id, 4);
+        Serial.printf("[gt911] probe 0x%02X: read=%d id=%02X %02X %02X %02X \"%c%c%c%c\"\n",
+                      s_addr, (int)ok, id[0], id[1], id[2], id[3],
+                      isprint(id[0]) ? id[0] : '.', isprint(id[1]) ? id[1] : '.',
+                      isprint(id[2]) ? id[2] : '.', isprint(id[3]) ? id[3] : '.');
+        // Accept the Goodix family, not just GT911. This panel reports "9271": a GT9271,
+        // which is the 10-point part (the manual advertises 10-point touch, so this fits)
+        // and shares the status/coordinate registers used below. The vendor's gt911.h
+        // belongs to the 3.4" variant; the 4" board carries a different controller.
+        if (ok && id[0] == '9') {
+            Serial.printf("[touch] Goodix GT%c%c%c%c at 0x%02X\n",
+                          id[0], id[1], id[2], id[3] ? id[3] : ' ', s_addr);
             return true;
         }
     }
     s_addr = 0;
-    Serial.println("[gt911] not found at 0x5D or 0x14");
+    // Not at either strap address. Scan the bus so the failure names what IS present
+    // instead of leaving us guessing -- the codec answering proves the bus itself works.
+    Serial.println("[gt911] not at 0x5D or 0x14; scanning bus:");
+    int found = 0;
+    for (uint8_t a = 0x08; a < 0x78; ++a) {
+        Wire.beginTransmission(a);
+        if (Wire.endTransmission() == 0) { Serial.printf("[i2c]   device at 0x%02X\n", a); ++found; }
+        delay(2);
+    }
+    if (!found) Serial.println("[i2c]   nothing responded");
     return false;
 }
 
