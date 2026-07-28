@@ -88,6 +88,7 @@ void setTracked(const char* hex);                 // pin a contact so the on-scr
 const char* tracked();                            // "" when nothing is tracked
 void setMapOpacity(int percent);                 // 0..100% map background visibility
 void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax);  // sweep smoothness telemetry
+uint32_t sweepFrameMs(void);      // measured interval between sweep ticks
 void setLargeText(bool on);                       // accessibility: bigger glyph labels. Call BEFORE init()
 
 } // namespace radar

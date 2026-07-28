@@ -66,19 +66,38 @@
 // masks the angular stepping, so shortening it exposed the very judder it was meant to
 // cure. Raw frame rate is not the thing being optimised here — perceived smoothness is.
 // Do not "optimise" these without looking at the screen.
-#define SWEEP_PERIOD_MS   6000   // nominal only; the sweep is now fixed-increment
-// Degrees advanced per rendered frame. Smaller = smoother but a slower revolution;
-// at ~10 fps, 3 deg gives roughly a 12 s sweep and ~11 px of travel at the rim.
-#define SWEEP_STEP_DEG    3.0f
+#define SWEEP_PERIOD_MS   6000   // one revolution, honoured whenever frames keep up
+// Largest distance the leading edge may travel in one frame, in pixels at the rim.
+//
+// Expressed in pixels rather than degrees on purpose: what the eye judges is how far the
+// beam jumps on screen, and the same angle is a bigger jump on a bigger radius. Three
+// degrees is ~11 px at the 466 panel's rim but ~18 px at 720, which is why the identical
+// setting looked fine on one board and stepped on the other.
+//
+// It is a clamp, not a fixed rate. The sweep advances by elapsed time, so a revolution
+// takes SWEEP_PERIOD_MS whenever frames keep up, and a late frame slows the beam rather
+// than teleporting it. Deriving the angle straight from the wall clock was what made the
+// S3 stutter; advancing a fixed amount per frame instead tied rotation speed to frame
+// rate, so the same firmware crawled on one panel and span on the other.
+#ifndef SWEEP_MAX_STEP_PX
+#  define SWEEP_MAX_STEP_PX 11.0f
+#endif
+#define SWEEP_MAX_STEP_DEG     (SWEEP_MAX_STEP_PX * 180.0f / (3.14159265f * (float)RADAR_R_OUTER_PX))
 // Deliberately not the fastest tick the panel can manage. The angle comes from the
 // wall clock, so a frame that misses its deadline advances the beam further rather than
 // later -- uneven angular steps, which the eye reads as stutter. Draw (~6-9 ms) plus the
 // QSPI flush of the invalidated wedge (~95 KB, ~9 ms) sits right on a 20 ms budget, so
 // frames landed inconsistently at 37-50 fps. A 30 ms tick every frame comfortably makes
 // is steadier than a 20 ms tick it sometimes misses: constant step beats peak rate.
-#define SWEEP_FRAME_MS    30
-#define SWEEP_TRAIL_DEG   55.0f
-#define SWEEP_TRAIL_STEPS 18   // see sweep_draw_cb: cost is per-polygon, not per-pixel
+#ifndef SWEEP_FRAME_MS
+#  define SWEEP_FRAME_MS  30
+#endif
+#ifndef SWEEP_TRAIL_DEG
+#  define SWEEP_TRAIL_DEG 55.0f
+#endif
+#ifndef SWEEP_TRAIL_STEPS
+#  define SWEEP_TRAIL_STEPS 18   // see sweep_draw_cb: cost is per-polygon
+#endif
 #define SWEEP_TRAIL_OPA   140
 
 // ---- aircraft / flow / orb config ----
@@ -388,6 +407,7 @@ static void grid_draw_cb(lv_event_t *e) {
 static uint32_t s_drawUsAcc = 0, s_drawCnt = 0, s_perfMarkMs = 0;
 static float    s_fps = 0.0f;
 static float    s_stepAcc = 0.0f, s_stepMaxCur = 0.0f, s_stepAvg = 0.0f, s_stepMax = 0.0f;
+static uint32_t s_dtAcc = 0, s_dtCnt = 0, s_dtAvg = 0;   // real tick interval, measured
 static uint32_t s_stepCnt = 0;
 static uint32_t s_drawUsAvg = 0;
 
@@ -525,15 +545,31 @@ static void sweep_timer_cb(lv_timer_t *t) {
     }
     if (!s_sweepEnabled) return;          // sweep disabled: glyph interpolation above still runs
     s_prevSweepDeg = s_sweepDeg;
-    // Advance a fixed amount per rendered frame rather than reading the angle off the
-    // wall clock. Clock-driven looks correct on paper -- the revolution is exactly
-    // SWEEP_PERIOD_MS -- but this panel renders a frame in ~90-110 ms against a 30 ms
-    // tick, so a late frame teleported the beam: measured steps averaged 6.5 deg with
-    // spikes to 16, a 2.5x jitter ratio. That unevenness is what reads as choppy.
-    // Fixed-increment trades exact period for constant motion, which is the thing the
-    // eye actually judges. Revolution time now floats with the achieved frame rate.
-    s_sweepDeg += SWEEP_STEP_DEG;
-    if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
+    // Advance by elapsed time, but never by more than SWEEP_MAX_STEP_DEG in one frame.
+    //
+    // The two obvious schemes each fail on one of these boards. Reading the angle from
+    // the wall clock gives an exact revolution period, but a frame that misses its
+    // deadline teleports the beam -- that was the S3's stutter, measured at 6.5 deg
+    // average steps with spikes to 16. Advancing a fixed amount per frame gives perfectly
+    // even steps but ties revolution speed to frame rate, so the same firmware crawls on
+    // a slow panel and spins on a fast one.
+    //
+    // Clamping a time-based advance gets both: constant speed while frames keep up, and a
+    // brief slowdown rather than a jump when one is late.
+    {
+        static uint32_t s_lastSweepMs = 0;
+        const uint32_t now = millis();
+        uint32_t dt = (s_lastSweepMs == 0) ? SWEEP_FRAME_MS : (now - s_lastSweepMs);
+        s_lastSweepMs = now;
+        // Measure the interval itself. Inferring it from the step is useless once the
+        // clamp is active -- the step just pins to its maximum and tells you nothing.
+        s_dtAcc += dt;
+        if (++s_dtCnt >= 40) { s_dtAvg = s_dtAcc / s_dtCnt; s_dtAcc = 0; s_dtCnt = 0; }
+        float step = 360.0f * (float)dt / (float)SWEEP_PERIOD_MS;
+        if (step > SWEEP_MAX_STEP_DEG) step = SWEEP_MAX_STEP_DEG;
+        s_sweepDeg += step;
+        if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
+    }
 
     // How far the beam actually moved this frame. This -- not framerate -- is what the
     // eye judges: a constant step looks smooth, a varying one looks like stutter even at
@@ -1343,6 +1379,8 @@ void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax) {
     if (stepAvg) *stepAvg = s_stepAvg;
     if (stepMax) *stepMax = s_stepMax;
 }
+
+uint32_t sweepFrameMs() { return s_dtAvg; }
 
 void setMapOpacity(int percent) {
     if (percent < 0)   percent = 0;

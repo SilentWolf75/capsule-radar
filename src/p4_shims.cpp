@@ -39,7 +39,7 @@ bool begin() {
     }
 
     lv_init();
-    const size_t px = (size_t)SCREEN_W * 40;
+    const size_t px = (size_t)SCREEN_W * LVGL_BUF_LINES;
     s_buf = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
     if (!s_buf) { Serial.println("[p4] draw buffer alloc failed"); return false; }
     lv_disp_draw_buf_init(&s_dbuf, s_buf, nullptr, px);

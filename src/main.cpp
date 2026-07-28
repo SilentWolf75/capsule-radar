@@ -1815,12 +1815,12 @@ void setup() {
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
                  "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\","
-                 "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f}",
+                 "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f,\"frame_ms\":%u}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
-                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax);
+                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs());
         g_web.send(200, "application/json", j);
     });
     g_web.on("/fwupd", handleFwUpd);

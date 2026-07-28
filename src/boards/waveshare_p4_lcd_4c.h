@@ -95,6 +95,21 @@
 // chip with a native PHY. The P4 has none (the C6 is the radio), so it cannot build
 // there and the captive portal needs a different mechanism.
 #define BOARD_HAS_WIFIMANAGER 0
+
+// This panel renders a sweep frame in ~3-5 ms against the S3's ~90-110, so it can afford
+// a much finer tick. At 12 ms the beam advances ~0.7 deg per frame instead of 3, which
+// matters more here than on the smaller screen: the same angle is ~18 px of travel at
+// this rim versus ~11 px at 466.
+#define SWEEP_FRAME_MS      12
+// LVGL draw buffer height. The S3 is squeezed into 24 lines because its internal RAM is
+// scarce and shared with mbedTLS; this board has 512 KB and 32 MB of PSRAM. A taller
+// buffer means far fewer chunks per frame, and chunk setup -- not pixel work -- is what
+// caps the frame rate here. 160 lines is 720*160*2 = 230 KB.
+#define LVGL_BUF_LINES      40
+// A shorter, coarser trail. The wedge is the dominant per-frame cost and it scales with
+// area: at this radius a 55 deg trail sweeps 54k pixels of alpha blending every frame.
+#define SWEEP_TRAIL_DEG     36.0f
+#define SWEEP_TRAIL_STEPS   12
 #define I2C_ADDR_IMU        -1
 #define I2C_ADDR_RTC        -1
 #define I2C_ADDR_PMIC       -1
