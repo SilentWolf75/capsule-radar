@@ -143,6 +143,12 @@ static int        s_flowMax         = FLOW_MAX;    // persistent flow-layer segm
 static int        s_flowGenMax      = 14;          // ...and an age cap in polls (~2 s each) so tracks fade out
 static lv_timer_t *s_timer    = nullptr;
 static float       s_sweepDeg = 0.0f;
+// Sweep shape, adjustable at runtime. Comparing variants by eye is the only way to judge
+// this -- measured frame time has twice pointed the wrong way -- and reflashing between
+// each one makes that comparison useless.
+static float       s_trailDeg   = SWEEP_TRAIL_DEG;
+static int         s_trailSteps = SWEEP_TRAIL_STEPS;
+static float       s_maxStepPx  = SWEEP_MAX_STEP_PX;
 static float       s_prevSweepDeg = 0.0f;
 static float       s_wavePhase = 0.0f;
 static uint32_t    s_lastUpdateMs = 0;       // smooth-motion: cadence + animation clock
@@ -423,8 +429,8 @@ static void sweep_draw_cb(lv_event_t *e) {
     // setup. 45 of them took 8-17 ms against a 20 ms budget, and because the angle is
     // clock-driven a missed deadline makes the beam jump rather than slow, which is what
     // reads as choppy. Fewer, wider bands buy headroom so every frame lands on time.
-    const int steps = SWEEP_TRAIL_STEPS;
-    const float stepDeg = SWEEP_TRAIL_DEG / (float)steps;
+    const int steps = s_trailSteps;
+    const float stepDeg = s_trailDeg / (float)steps;
     lv_draw_rect_dsc_t polyDsc;
     lv_draw_rect_dsc_init(&polyDsc);
     polyDsc.bg_color = s_cRing;
@@ -473,7 +479,7 @@ static void wedge_bbox(float deg, lv_area_t *out) {
     lv_coord_t minx = s_cx, maxx = s_cx, miny = s_cy, maxy = s_cy;
     const int steps = 10;
     for (int i = 0; i <= steps; ++i) {
-        const float a = deg - SWEEP_TRAIL_DEG * (float)i / (float)steps;
+        const float a = deg - s_trailDeg * (float)i / (float)steps;
         const lv_point_t p = rim_point(a, (float)RADAR_R_OUTER_PX);
         if (p.x < minx) minx = p.x;
         if (p.x > maxx) maxx = p.x;
@@ -566,7 +572,9 @@ static void sweep_timer_cb(lv_timer_t *t) {
         s_dtAcc += dt;
         if (++s_dtCnt >= 40) { s_dtAvg = s_dtAcc / s_dtCnt; s_dtAcc = 0; s_dtCnt = 0; }
         float step = 360.0f * (float)dt / (float)SWEEP_PERIOD_MS;
-        if (step > SWEEP_MAX_STEP_DEG) step = SWEEP_MAX_STEP_DEG;
+        const float maxStep = s_maxStepPx * 180.0f
+                              / (3.14159265f * (float)RADAR_R_OUTER_PX);
+        if (step > maxStep) step = maxStep;
         s_sweepDeg += step;
         if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
     }
@@ -1381,6 +1389,18 @@ void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax) {
 }
 
 uint32_t sweepFrameMs() { return s_dtAvg; }
+
+void setSweepTuning(float trailDeg, int trailSteps, float maxStepPx) {
+    if (trailDeg   > 5.0f && trailDeg   <= 180.0f) s_trailDeg   = trailDeg;
+    if (trailSteps >= 4   && trailSteps <= 48)     s_trailSteps = trailSteps;
+    if (maxStepPx  > 1.0f && maxStepPx  <= 60.0f)  s_maxStepPx  = maxStepPx;
+}
+
+void sweepTuning(float *trailDeg, int *trailSteps, float *maxStepPx) {
+    if (trailDeg)   *trailDeg   = s_trailDeg;
+    if (trailSteps) *trailSteps = s_trailSteps;
+    if (maxStepPx)  *maxStepPx  = s_maxStepPx;
+}
 
 void setMapOpacity(int percent) {
     if (percent < 0)   percent = 0;

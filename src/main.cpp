@@ -850,6 +850,19 @@ static void handleRoot() {
         "Automatic installing is off by default &mdash; a bad published build would "
         "otherwise reach the device with no cable in reach. "
         "<a href=/update style='color:#9affc8'>Upload a .bin manually</a></div></div>"
+        // Sweep variants, on the page rather than behind a URL. Judging these means
+        // flipping between them repeatedly while watching the panel, which is intolerable
+        // if each switch costs a reflash or a hand-typed address.
+        "<div class=card><div class=t>Sweep feel</div>"
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 6px'>Applies instantly. Watch the "
+        "scope and pick whichever reads smoothest.</p>"
+        "<div style='display:flex;gap:6px;flex-wrap:wrap'>"
+        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(1)\">1</button>"
+        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(2)\">2</button>"
+        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(3)\">3</button>"
+        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(4)\">4</button>"
+        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(5)\">5</button>"
+        "</div><p id=swn style='color:#1dff86;font-size:12px;margin:8px 0 0'></p></div>"
         "<div class=card><div class=t>Network</div>"
 #if !BOARD_HAS_WIFIMANAGER
         // Boards without WiFiManager have no captive portal, so credential entry has to
@@ -900,6 +913,7 @@ static void handleRoot() {
         "function mx(v){fetch('/maxac?v='+v+'&save=1')}"
         "function bt(c){fetch('/bigtext?v='+(c?1:0)+'&save=1')}"
         "function ro(v){fetch('/rotate?v='+v+'&save=1')}"
+        "function sw(n){fetch('/sweeptune?p='+n).then(r=>r.text()).then(t=>{document.getElementById('swn').textContent=t})}"
         "function u(v){fetch('/units?v='+v+'&save=1')}"
         "function al(v){fetch('/alerts?mode='+v+'&save=1')}"
         "function px(v){fetch('/alerts?prox='+v+'&save=1')}"
@@ -1825,6 +1839,33 @@ void setup() {
     });
     g_web.on("/fwupd", handleFwUpd);
     g_web.on("/shot.bmp", handleShot);
+    // Numbered sweep variants, switchable live. Two rounds of tuning by measurement made
+    // the motion worse, so the useful loop is: flip between presets, judge by eye.
+    g_web.on("/sweeptune", []() {
+        struct P { const char *name; float deg; int steps; float px; };
+        static const P kPresets[] = {
+            { "1 long trail, coarse step (current)",  55.0f, 18, 17.6f },
+            { "2 longer trail, coarse step",          75.0f, 24, 17.6f },
+            { "3 long trail, fine step (slower)",     55.0f, 18, 11.0f },
+            { "4 max trail, fast rotation",           90.0f, 28, 22.0f },
+            { "5 short trail, fast rotation",         40.0f, 14, 24.0f },
+        };
+        const int n = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
+        char out[160];
+        if (g_web.hasArg("p")) {
+            int i = g_web.arg("p").toInt() - 1;
+            if (i >= 0 && i < n) {
+                radar::setSweepTuning(kPresets[i].deg, kPresets[i].steps, kPresets[i].px);
+                snprintf(out, sizeof(out), "preset %s", kPresets[i].name);
+                g_web.send(200, "text/plain", out);
+                return;
+            }
+        }
+        float d = 0, px = 0; int st = 0;
+        radar::sweepTuning(&d, &st, &px);
+        snprintf(out, sizeof(out), "trail %.0f deg / %d bands, max step %.1f px", d, st, px);
+        g_web.send(200, "text/plain", out);
+    });
     g_web.on("/view", handleView);
     g_web.on("/clockfmt", handleClockFmt);
     g_web.on("/typeicons", handleTypeIcons);

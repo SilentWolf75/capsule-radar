@@ -96,11 +96,10 @@
 // there and the captive portal needs a different mechanism.
 #define BOARD_HAS_WIFIMANAGER 0
 
-// This panel renders a sweep frame in ~3-5 ms against the S3's ~90-110, so it can afford
-// a much finer tick. At 12 ms the beam advances ~0.7 deg per frame instead of 3, which
-// matters more here than on the smaller screen: the same angle is ~18 px of travel at
-// this rim versus ~11 px at 466.
-#define SWEEP_FRAME_MS      12
+// Left at the shared default. A finer tick was tried on the assumption this panel
+// renders in ~3-5 ms; measuring frame_ms showed the real figure is ~85 ms, so asking for
+// 12 ms only invites LVGL to run the timer more than once per rendered frame -- which
+// would advance the beam several steps between two things the eye actually sees.
 // LVGL draw buffer height. The S3 is squeezed into 24 lines because its internal RAM is
 // scarce and shared with mbedTLS; this board has 512 KB and 32 MB of PSRAM. A taller
 // buffer means far fewer chunks per frame, and chunk setup -- not pixel work -- is what

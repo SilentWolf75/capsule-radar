@@ -89,6 +89,9 @@ const char* tracked();                            // "" when nothing is tracked
 void setMapOpacity(int percent);                 // 0..100% map background visibility
 void sweepPerf(float *fps, uint32_t *drawUs, float *stepAvg, float *stepMax);  // sweep smoothness telemetry
 uint32_t sweepFrameMs(void);      // measured interval between sweep ticks
+// Sweep shape, tunable live so variants can be judged by eye without a reflash.
+void setSweepTuning(float trailDeg, int trailSteps, float maxStepPx);
+void sweepTuning(float *trailDeg, int *trailSteps, float *maxStepPx);
 void setLargeText(bool on);                       // accessibility: bigger glyph labels. Call BEFORE init()
 
 } // namespace radar
