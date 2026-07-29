@@ -83,6 +83,12 @@ static bool                  g_milOnly      = false;                 // only sho
 static int                   g_rotation = 0;                         // clockwise display rotation, 0..359° (web/NVS)
 static bool                  g_useGps = false;                       // auto-set home from the LC76G GPS (-G variant) (web/NVS)
 static int                   g_trailLen = 2;                         // aircraft trails 0=off 1=short 2=med 3=long (web/NVS)
+// Where the frame time actually goes. The sweep tick only runs as often as loop()
+// completes, so if something outside rendering is slow the sweep stutters no matter how
+// it is drawn -- and no amount of trail tuning will touch it.
+static volatile uint32_t g_loopLvglUs = 0, g_loopRestUs = 0, g_loopCount = 0;
+static float g_loopLvglMs = 0, g_loopRestMs = 0;
+
 static int                   g_maxAc = 20;                           // max aircraft drawn on the scope (web/NVS)
 static bool                  g_bigText = false;                      // accessibility: large fonts (web/NVS, applied at boot)
 static volatile bool         g_onBattery = false;                    // discharging (set on core 1, read on core 0)
@@ -1824,17 +1830,18 @@ void setup() {
     g_web.on("/diag", []() {
         float sfps = 0, savg = 0, smax = 0; uint32_t sdraw = 0;
         radar::sweepPerf(&sfps, &sdraw, &savg, &smax);
-        char j[416];
+        char j[480];
         snprintf(j, sizeof(j),
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
                  "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\","
-                 "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f,\"frame_ms\":%u}",
+                 "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f,\"frame_ms\":%u,"
+                 "\"lvgl_ms\":%.1f,\"rest_ms\":%.1f}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
-                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs());
+                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs(), g_loopLvglMs, g_loopRestMs);
         g_web.send(200, "application/json", j);
     });
     g_web.on("/fwupd", handleFwUpd);
@@ -1843,15 +1850,31 @@ void setup() {
     // the motion worse, so the useful loop is: flip between presets, judge by eye.
     g_web.on("/sweeptune", []() {
         struct P { const char *name; float deg; int steps; float px; };
+        // All keep the 55 deg trail, which reads best; they trade the smoothness of the
+        // gradient inside it against frame rate. Band count is what costs time -- each
+        // band is a separate polygon fill -- and frame rate is what the stutter actually
+        // tracks, not the trail's shape.
         static const P kPresets[] = {
-            { "1 long trail, coarse step (current)",  55.0f, 18, 17.6f },
-            { "2 longer trail, coarse step",          75.0f, 24, 17.6f },
-            { "3 long trail, fine step (slower)",     55.0f, 18, 11.0f },
-            { "4 max trail, fast rotation",           90.0f, 28, 22.0f },
-            { "5 short trail, fast rotation",         40.0f, 14, 24.0f },
+            { "1 smoothest gradient, 81 ms/frame", 55.0f, 18, 17.6f },
+            { "2 fine gradient, 77 ms/frame",      55.0f, 12, 17.6f },
+            { "3 medium gradient, 72 ms/frame",    55.0f,  8, 17.6f },
+            { "4 coarse gradient, 60 ms/frame",    55.0f,  5, 17.6f },
+            { "5 banded, fastest ~55 ms/frame",    55.0f,  3, 17.6f },
         };
         const int n = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
         char out[160];
+        // Direct control as well as presets, so one variable can be moved at a time.
+        if (g_web.hasArg("deg") || g_web.hasArg("steps") || g_web.hasArg("px")) {
+            float d = 0, px = 0; int st = 0;
+            radar::sweepTuning(&d, &st, &px);
+            if (g_web.hasArg("deg"))   d  = g_web.arg("deg").toFloat();
+            if (g_web.hasArg("steps")) st = g_web.arg("steps").toInt();
+            if (g_web.hasArg("px"))    px = g_web.arg("px").toFloat();
+            radar::setSweepTuning(d, st, px);
+            snprintf(out, sizeof(out), "trail %.0f deg / %d bands, max step %.1f px", d, st, px);
+            g_web.send(200, "text/plain", out);
+            return;
+        }
         if (g_web.hasArg("p")) {
             int i = g_web.arg("p").toInt() - 1;
             if (i >= 0 && i < n) {
@@ -1907,8 +1930,11 @@ static void pollSerialConfig() {
 }
 
 void loop() {
+    const uint32_t tLoop0 = micros();
     pollSerialConfig();
-    display::loop();                // drive LVGL (render dirty areas + run timers)
+    const uint32_t tLv0 = micros();
+    display::loop();
+    const uint32_t tLv1 = micros();                // drive LVGL (render dirty areas + run timers)
 #if BOARD_HAS_WIFIMANAGER
     g_wm.process();                 // service the WiFi config portal (non-blocking)
 #endif
@@ -2058,4 +2084,17 @@ void loop() {
     }
 
     delay(5);
+    // Split the loop into "LVGL" and "everything else" so the bottleneck is a measurement
+    // rather than a guess.
+    {
+        const uint32_t now = micros();
+        g_loopLvglUs += (tLv1 - tLv0);
+        g_loopRestUs += (now - tLoop0) - (tLv1 - tLv0);
+        if (++g_loopCount >= 60) {
+            g_loopLvglMs = g_loopLvglUs / g_loopCount / 1000.0f;
+            g_loopRestMs = g_loopRestUs / g_loopCount / 1000.0f;
+            g_loopLvglUs = g_loopRestUs = g_loopCount = 0;
+        }
+    }
+
 }

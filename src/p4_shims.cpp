@@ -40,7 +40,15 @@ bool begin() {
 
     lv_init();
     const size_t px = (size_t)SCREEN_W * LVGL_BUF_LINES;
-    s_buf = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    // Internal DMA RAM, not PSRAM. LVGL alpha-blends into this buffer pixel by pixel, and
+    // this board has 512 KB of internal RAM largely unused -- unlike the S3, where the
+    // same buffer competes with mbedTLS for a scarce contiguous block.
+    s_buf = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t),
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!s_buf) {
+        Serial.println("[p4] internal draw buffer failed; falling back to PSRAM");
+        s_buf = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    }
     if (!s_buf) { Serial.println("[p4] draw buffer alloc failed"); return false; }
     lv_disp_draw_buf_init(&s_dbuf, s_buf, nullptr, px);
 

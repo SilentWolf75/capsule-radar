@@ -551,41 +551,42 @@ static void sweep_timer_cb(lv_timer_t *t) {
     }
     if (!s_sweepEnabled) return;          // sweep disabled: glyph interpolation above still runs
     s_prevSweepDeg = s_sweepDeg;
-    // Advance by elapsed time, but never by more than SWEEP_MAX_STEP_DEG in one frame.
+    // Fixed increment per rendered frame -- NOT elapsed time.
     //
-    // The two obvious schemes each fail on one of these boards. Reading the angle from
-    // the wall clock gives an exact revolution period, but a frame that misses its
-    // deadline teleports the beam -- that was the S3's stutter, measured at 6.5 deg
-    // average steps with spikes to 16. Advancing a fixed amount per frame gives perfectly
-    // even steps but ties revolution speed to frame rate, so the same firmware crawls on
-    // a slow panel and spins on a fast one.
+    // Time-based advance was tried here and reverted: it looked correct on paper, and the
+    // clamp pinned the step to its maximum whenever a frame took longer than ~50 ms, but
+    // frames on this panel range 57-118 ms. Every frame under that threshold advanced
+    // less than a full step, so the step varied frame to frame. That variance is small
+    // enough to hide in the averages and plainly visible on the panel.
     //
-    // Clamping a time-based advance gets both: constant speed while frames keep up, and a
-    // brief slowdown rather than a jump when one is late.
+    // A fixed increment has zero step variance by construction. The cost is that
+    // revolution time follows frame rate rather than the nominal period, which is the
+    // trade this project has repeatedly chosen: even motion beats a correct period.
+    //
+    // The size still comes from the pixel setting, so one number means the same thing on
+    // both panels: the same angle is ~11 px of rim travel at 466 and ~18 px at 720.
     {
-        static uint32_t s_lastSweepMs = 0;
         const uint32_t now = millis();
-        uint32_t dt = (s_lastSweepMs == 0) ? SWEEP_FRAME_MS : (now - s_lastSweepMs);
+        static uint32_t s_lastSweepMs = 0;
+        if (s_lastSweepMs) {
+            const uint32_t dt = now - s_lastSweepMs;
+            s_dtAcc += dt;
+            if (++s_dtCnt >= 40) { s_dtAvg = s_dtAcc / s_dtCnt; s_dtAcc = 0; s_dtCnt = 0; }
+        }
         s_lastSweepMs = now;
-        // Measure the interval itself. Inferring it from the step is useless once the
-        // clamp is active -- the step just pins to its maximum and tells you nothing.
-        s_dtAcc += dt;
-        if (++s_dtCnt >= 40) { s_dtAvg = s_dtAcc / s_dtCnt; s_dtAcc = 0; s_dtCnt = 0; }
-        float step = 360.0f * (float)dt / (float)SWEEP_PERIOD_MS;
-        const float maxStep = s_maxStepPx * 180.0f
+
+        const float stepDeg = s_maxStepPx * 180.0f
                               / (3.14159265f * (float)RADAR_R_OUTER_PX);
-        if (step > maxStep) step = maxStep;
-        s_sweepDeg += step;
+        s_sweepDeg += stepDeg;
         if (s_sweepDeg >= 360.0f) s_sweepDeg -= 360.0f;
     }
 
-    // How far the beam actually moved this frame. This -- not framerate -- is what the
-    // eye judges: a constant step looks smooth, a varying one looks like stutter even at
-    // a high average rate. step_max/step_avg is the stutter ratio; 1.0 is perfect.
+    // How far the beam actually moved. Kept as telemetry even though the increment is
+    // fixed: it is what proves the step is not varying.
     {
         float d = s_sweepDeg - s_prevSweepDeg;
         if (d < 0) d += 360.0f;
-        if (d > 0.0f && d < 90.0f) {          // ignore the wrap and the first frame
+        if (d > 0.0f && d < 90.0f) {
             s_stepAcc += d;
             if (d > s_stepMaxCur) s_stepMaxCur = d;
             if (++s_stepCnt >= 40) {
