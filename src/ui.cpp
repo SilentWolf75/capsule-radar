@@ -296,6 +296,15 @@ static void refresh_card(void) {
     lv_label_set_text(s_cardL, left);
     lv_label_set_text(s_cardR, right);
 
+    // Re-anchor the route under the info block every refresh. lv_obj_align_to() is a
+    // one-shot calculation in LVGL 8, not a live constraint: aligning at construction
+    // time measured an empty label, so the route sat on top of the rows once they had
+    // text. It has to be redone whenever the block's height can change.
+    if (s_cardRoute && s_cardL) {
+        lv_obj_update_layout(s_cardL);
+        lv_obj_align_to(s_cardRoute, s_cardL, LV_ALIGN_OUT_BOTTOM_LEFT, 0, UI_S(4));
+    }
+
     if (s_cardTrackLbl) {
         const bool isTracked = s_trackHex[0] && strcmp(s_trackHex, in.hex) == 0;
         lv_label_set_text(s_cardTrackLbl, isTracked ? "TRACKING" : "TRACK");
@@ -329,14 +338,18 @@ static void refresh_card(void) {
         lv_color_t *pbuf = photo_buffer(&mw, &mh);
         lv_canvas_set_buffer(s_photo, pbuf, pw, ph, LV_IMG_CF_TRUE_COLOR);
         lv_obj_set_size(s_photo, pw, ph);
-        lv_obj_align(s_photo, LV_ALIGN_CENTER, 0, -28 - ph / 2);   // sit lower: fill the band down to the card
+        // Scaled gap: unscaled, the photo drifted down onto the card's top edge on a
+        // larger panel and pushed its credit line out over the map.
+        lv_obj_align(s_photo, LV_ALIGN_CENTER, 0, UI_S(-28) - ph / 2);
         lv_obj_clear_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(s_photo);
         if (s_photoCredit) {
             char c[52];
             snprintf(c, sizeof(c), "Photo: %s", pcred[0] ? pcred : "planespotters.net");
             lv_label_set_text(s_photoCredit, c);
-            lv_obj_align_to(s_photoCredit, s_photo, LV_ALIGN_OUT_BOTTOM_MID, UI_S(0), UI_S(1));
+            // Inside the image, not below it. Below, it fell into the gap between photo
+            // and card and read as floating over the map.
+            lv_obj_align_to(s_photoCredit, s_photo, LV_ALIGN_BOTTOM_MID, 0, UI_S(-2));
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         }
     } else if (s_photo) {
@@ -1374,17 +1387,18 @@ static void build_card(void) {
     s_cardL = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardL, F14(), 0);
     lv_obj_set_style_text_color(s_cardL, UI_SOFT, 0);
-    lv_obj_align(s_cardL, LV_ALIGN_TOP_LEFT, 0, s_bigText ? 30 : 26);
+    lv_obj_align(s_cardL, LV_ALIGN_TOP_LEFT, 0, UI_S(s_bigText ? 30 : 26));
 
     s_cardR = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardR, F14(), 0);
     lv_obj_set_style_text_color(s_cardR, UI_SOFT, 0);
-    lv_obj_align(s_cardR, LV_ALIGN_TOP_LEFT, s_bigText ? 160 : 150, s_bigText ? 30 : 26);
+    lv_obj_align(s_cardR, LV_ALIGN_TOP_LEFT, UI_S(s_bigText ? 160 : 150),
+                 UI_S(s_bigText ? 30 : 26));
 
     s_cardRoute = lv_label_create(s_card);
     lv_obj_set_style_text_font(s_cardRoute, F14(), 0);
     lv_obj_set_style_text_color(s_cardRoute, UI_GREEN, 0);
-    lv_obj_align(s_cardRoute, LV_ALIGN_TOP_LEFT, 0, s_bigText ? 100 : 76);
+    lv_obj_align_to(s_cardRoute, s_cardL, LV_ALIGN_OUT_BOTTOM_LEFT, 0, UI_S(4));
 
 
     s_cardAirline = lv_label_create(s_card);
