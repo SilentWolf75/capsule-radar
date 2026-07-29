@@ -7,11 +7,11 @@
 // Values here were taken from the Waveshare board definition and a working Arduino_GFX
 // port, never guessed. See docs/HARDWARE.md.
 
-// mDNS name and setup AP. Distinct per board: both used to answer to
-// skyglass.local, so running two at once made only one of them reachable and
-// the config page unusable.
-#define BOARD_HOSTNAME      "skyglass"
-#define BOARD_SETUP_AP      "SkyGlass-Setup"
+// mDNS name and setup AP, named after the chip so the address says which board
+// you are looking at. Both used to answer to skyglass.local, which meant only
+// one was reachable when two were powered on.
+#define BOARD_HOSTNAME      "skyglass-s3"
+#define BOARD_SETUP_AP      "SkyGlass-S3-Setup"
 #define BOARD_NAME          "Waveshare ESP32-S3-Touch-AMOLED-1.75"
 #define BOARD_PANEL_QSPI    1        // Arduino_GFX + CO5300 over QSPI
 #define BOARD_PANEL_DSI     0

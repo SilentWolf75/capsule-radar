@@ -1,8 +1,9 @@
 #pragma once
 // Waveshare ESP32-P4-WIFI6-Touch-LCD-4C — 4" round IPS, 720x720, MIPI-DSI.
 //
-// STATUS: drivers written against vendor data; nothing hardware-verified yet. See
-// docs/PORT_P4.md for what is done, what is blocked, and why.
+// STATUS: running on hardware. Display, touch (GT9271), audio codec, WiFi via the C6,
+// the ADS-B feed, the web config page and OTA are all confirmed working. See
+// docs/PORT_P4.md.
 //
 // Hardware, from the vendor wiki (waveshare.com/wiki/ESP32-P4-WIFI6-Touch-LCD-4C):
 //   ESP32-P4NRW32   dual-core RISC-V (HP) + 40 MHz RISC-V (LP)
@@ -17,11 +18,11 @@
 //   [COMMUNITY] from an ESPHome config for this board; plausible, not vendor-confirmed
 // Per CLAUDE.md nothing here is guessed: it is sourced or it stays -1.
 
-// mDNS name and setup AP. Distinct per board: both used to answer to
-// skyglass.local, so running two at once made only one of them reachable and
-// the config page unusable.
-#define BOARD_HOSTNAME      "skyglass4"
-#define BOARD_SETUP_AP      "SkyGlass4-Setup"
+// mDNS name and setup AP, named after the chip so the address says which board
+// you are looking at. Both used to answer to skyglass.local, which meant only
+// one was reachable when two were powered on.
+#define BOARD_HOSTNAME      "skyglass-p4"
+#define BOARD_SETUP_AP      "SkyGlass-P4-Setup"
 #define BOARD_NAME          "Waveshare ESP32-P4-WIFI6-Touch-LCD-4C"
 #define BOARD_PANEL_QSPI    0
 #define BOARD_PANEL_DSI     1        // esp_lcd_mipi_dsi, NOT Arduino_GFX
@@ -101,23 +102,19 @@
 // there and the captive portal needs a different mechanism.
 #define BOARD_HAS_WIFIMANAGER 0
 
-// Left at the shared default. A finer tick was tried on the assumption this panel
-// renders in ~3-5 ms; measuring frame_ms showed the real figure is ~85 ms, so asking for
-// 12 ms only invites LVGL to run the timer more than once per rendered frame -- which
-// would advance the beam several steps between two things the eye actually sees.
-// LVGL draw buffer height. The S3 is squeezed into 24 lines because its internal RAM is
-// scarce and shared with mbedTLS; this board has 512 KB and 32 MB of PSRAM. A taller
-// buffer means far fewer chunks per frame, and chunk setup -- not pixel work -- is what
-// caps the frame rate here. 160 lines is 720*160*2 = 230 KB.
-#define LVGL_BUF_LINES      40
-// Trail length left at the default 55 deg. Shortening it to 36 did make frames ~25%
-// cheaper, but it looked worse on the panel: the trail works as motion blur, and cutting
-// it exposed each individual step. Same lesson as the S3 -- the measurement improved and
-// the appearance did not.
+// LVGL draw buffer height. A taller buffer was tried on the theory that fewer, larger
+// chunks would cut per-chunk overhead: 160 lines made no difference at all -- 85 ms a
+// frame either way -- so the cost is pixel work, not chunk setup. Left at 40.
 //
-// Step limit kept at what this board was doing before: 17.6 px at the rim is the old
-// 3 deg. Reducing it to 11 px bought smoother arithmetic and a slower, more obviously
-// stepped sweep.
+// The sweep tick is left at the shared default too. A finer 12 ms tick was tried on the
+// assumption this panel renders in ~3-5 ms; measuring frame_ms showed ~85 ms, so asking
+// for 12 only invites LVGL to run the timer more than once per rendered frame.
+#define LVGL_BUF_LINES      40
+// Trail length left at the default 55 deg. Shortening it to 36 made frames ~25% cheaper
+// and looked worse: the trail works as motion blur, and cutting it exposed each step.
+//
+// 17.6 px at this rim is the same angle the board ran before -- 3 deg. Reducing it to
+// 11 px gave smoother arithmetic and a slower, more obviously stepped sweep.
 #define SWEEP_MAX_STEP_PX   17.6f
 #define I2C_ADDR_IMU        -1
 #define I2C_ADDR_RTC        -1
