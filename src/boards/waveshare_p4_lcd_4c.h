@@ -17,6 +17,11 @@
 //   [COMMUNITY] from an ESPHome config for this board; plausible, not vendor-confirmed
 // Per CLAUDE.md nothing here is guessed: it is sourced or it stays -1.
 
+// mDNS name and setup AP. Distinct per board: both used to answer to
+// skyglass.local, so running two at once made only one of them reachable and
+// the config page unusable.
+#define BOARD_HOSTNAME      "skyglass4"
+#define BOARD_SETUP_AP      "SkyGlass4-Setup"
 #define BOARD_NAME          "Waveshare ESP32-P4-WIFI6-Touch-LCD-4C"
 #define BOARD_PANEL_QSPI    0
 #define BOARD_PANEL_DSI     1        // esp_lcd_mipi_dsi, NOT Arduino_GFX

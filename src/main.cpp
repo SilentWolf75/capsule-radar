@@ -167,7 +167,7 @@ static void adsb_task(void*) {
             WiFi.setSleep(false);
             Serial.printf("[adsb] WiFi up, IP %s\n", WiFi.localIP().toString().c_str());
             configTzTime(g_tz.c_str(), "pool.ntp.org", "time.nist.gov");  // local time (web-configurable TZ)
-            Serial.println("[web] config: http://skyglass.local/  (or the IP above)");
+            Serial.println("[web] config: http://" BOARD_HOSTNAME ".local/  (or the IP above)");
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
@@ -882,7 +882,7 @@ static void handleRoot() {
 #endif
         "<p style='color:#9affc8;font-size:13px;margin:8px 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
         "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
-        "<p class=ft>Reach me at <code>skyglass.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
+        "<p class=ft>Reach me at <code>" BOARD_HOSTNAME ".local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
         "var C=[%.5f,%.5f];var MAP=L.map('map').setView(C,10);"
         "L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'(c) OpenStreetMap'}).addTo(MAP);"
@@ -1034,7 +1034,7 @@ static void handleWifiSave() {
         "<meta http-equiv=refresh content='6;url=/'><body style='background:#06100a;color:#1dff86;"
         "font-family:sans-serif;padding:24px'>Saved. Reconnecting&hellip;<br><br>"
         "If this page does not come back, rejoin your normal WiFi and open "
-        "<code>skyglass.local</code>.</body>");
+        "<code>" BOARD_HOSTNAME ".local</code>.</body>");
     g_rebootAtMs = millis() + 1200;
 }
 #endif
@@ -1042,7 +1042,7 @@ static void handleWifiSave() {
 static void handleWifi() {
     g_web.send(200, "text/html",
         "<body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
-        "WiFi reset. Connect to the <b>SkyGlass-Setup</b> network to reconfigure.</body>");
+        "WiFi reset. Connect to the <b>" BOARD_SETUP_AP "</b> network to reconfigure.</body>");
     delay(400);                     // let the response reach the browser
     // The driver stores the saved AP in its own NVS namespace ("nvs.net80211"). On Arduino
     // core 3.x both wm.resetSettings() and WiFi.disconnect(true,true) can silently no-op
@@ -1740,7 +1740,7 @@ void setup() {
         Serial.println("[wifi] new credentials saved -> rebooting for a clean web/mDNS start");
         g_rebootAtMs = millis() + 2500;   // let the portal deliver its 'saved' page first
     });
-    if (g_wm.autoConnect("SkyGlass-Setup"))
+    if (g_wm.autoConnect(BOARD_SETUP_AP))
         Serial.println("[wifi] connected");
     else
         Serial.println("[wifi] config portal open - join 'SkyGlass-Setup' to set WiFi; UI stays live");
@@ -1760,7 +1760,7 @@ void setup() {
             // and AP mode is not a given -- if softAP() fails there is simply no network
             // to join and the setup page is unreachable, which looks identical to the
             // page being broken.
-            const bool apOk = WiFi.mode(WIFI_AP) && WiFi.softAP("SkyGlass-Setup");
+            const bool apOk = WiFi.mode(WIFI_AP) && WiFi.softAP(BOARD_SETUP_AP);
             if (apOk) {
                 Serial.printf("[wifi] SoftAP up: join 'SkyGlass-Setup', open http://%s/\n",
                               WiFi.softAPIP().toString().c_str());
@@ -1947,7 +1947,7 @@ void loop() {
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
     static bool otaUp = false;
     if (!otaUp && WiFi.status() == WL_CONNECTED) {
-        ArduinoOTA.setHostname("skyglass");        // -> skyglass.local (registers mDNS)
+        ArduinoOTA.setHostname(BOARD_HOSTNAME);    // -> <hostname>.local (registers mDNS)
         ArduinoOTA.begin();
         MDNS.addService("http", "tcp", 80);            // advertise the config web page
         otaUp = true;
