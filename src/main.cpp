@@ -1736,7 +1736,7 @@ void setup() {
             // page being broken.
             const bool apOk = WiFi.mode(WIFI_AP) && WiFi.softAP(BOARD_SETUP_AP);
             if (apOk) {
-                Serial.printf("[wifi] SoftAP up: join 'SkyGlass-Setup', open http://%s/\n",
+                Serial.printf("[wifi] SoftAP up: join '" BOARD_SETUP_AP "', open http://%s/\n",
                               WiFi.softAPIP().toString().c_str());
             } else {
                 Serial.println("[wifi] SoftAP FAILED - no setup network. Set credentials over "
