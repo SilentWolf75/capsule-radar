@@ -26,19 +26,34 @@ jobs:
         run: pip install platformio esptool
 
       - name: Build firmware
-        run: pio run -e esp32-s3-amoled-175
-
-      - name: Merge into a single flashable binary
         run: |
-          B=.pio/build/esp32-s3-amoled-175
+          pio run -e esp32-s3-amoled-175
+          pio run -e esp32-p4-lcd-4c
+
+      - name: Merge into single flashable binaries
+        run: |
           BOOT_APP0="$(find "$HOME/.platformio/packages" -name boot_app0.bin -path '*framework-arduinoespressif32*' | head -1)"
+
+          B=.pio/build/esp32-s3-amoled-175
           python -m esptool --chip esp32s3 merge_bin -o SkyGlass-esp32s3.bin \
             --flash_mode dio --flash_freq 80m --flash_size 16MB \
             0x0     "$B/bootloader.bin" \
             0x8000  "$B/partitions.bin" \
             0xe000  "$BOOT_APP0" \
             0x10000 "$B/firmware.bin"
-          cp "$B/firmware.bin" SkyGlass-ota.bin   # app-only image for the device's web OTA page
+          cp "$B/firmware.bin" SkyGlass-ota.bin      # app-only image for the web OTA page
+
+          # The P4's bootloader lives at 0x2000, not 0x0 -- esptool's own esp32p4.py sets
+          # BOOTLOADER_FLASH_OFFSET there because the first two sectors are reserved. The
+          # merged file still starts at 0x0; merge_bin pads the gap.
+          P=.pio/build/esp32-p4-lcd-4c
+          python -m esptool --chip esp32p4 merge_bin -o SkyGlass-esp32p4.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 32MB \
+            0x2000  "$P/bootloader.bin" \
+            0x8000  "$P/partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$P/firmware.bin"
+          cp "$P/firmware.bin" SkyGlass-p4-ota.bin
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -46,12 +61,21 @@ jobs:
           files: |
             SkyGlass-esp32s3.bin
             SkyGlass-ota.bin
+            SkyGlass-esp32p4.bin
+            SkyGlass-p4-ota.bin
           generate_release_notes: true
           body: |
-            **First flash (USB):** `SkyGlass-esp32s3.bin` — the full merged image (offset `0x0`).
-            - Browser, no toolchain: https://silentwolf75.github.io/skyglass/
-            - Or: `esptool.py --chip esp32s3 write_flash 0x0 SkyGlass-esp32s3.bin`
+            Two boards, one firmware: **ESP32-S3-Touch-AMOLED-1.75** (466×466) and
+            **ESP32-P4-WIFI6-Touch-LCD-4C** (720×720).
 
-            **Update over WiFi (no cable):** `SkyGlass-ota.bin` — the app-only image.
-            Open `http://skyglass.local/update` on the device and upload this file.
-            (Do **not** upload the merged image there.)
+            **First flash (USB)** — the browser installer detects which board you have
+            and writes the matching build: https://silentwolf75.github.io/skyglass/
+
+            Or with esptool, using the merged image for your board:
+            - S3: `esptool.py --chip esp32s3 write_flash 0x0 SkyGlass-esp32s3.bin`
+            - P4: `esptool.py --chip esp32p4 write_flash 0x0 SkyGlass-esp32p4.bin`
+
+            **Update over WiFi (no cable)** — the app-only image, uploaded on the
+            device's own update page. Do **not** upload a merged image there.
+            - S3: `SkyGlass-ota.bin` → `http://skyglass-s3.local/update`
+            - P4: `SkyGlass-p4-ota.bin` → `http://skyglass-p4.local/update`
