@@ -84,14 +84,21 @@ jobs:
             0xe000  "$BOOT_APP0" \
             0x10000 "$B/firmware.bin"
 
-          # The P4 board is published as a plain application image, not through the
-          # browser flasher: ESP Web Tools drives esptool-js, and P4 support there is not
-          # something this project has verified. This file is what the device's own OTA
-          # page accepts, and what `esptool write_flash 0x10000` wants.
+          # The P4 goes through the same browser flasher: esptool-js and ESP Web Tools
+          # both list ESP32-P4, and the manifest carries a second build so the page picks
+          # the right one from whichever chip is plugged in. Note the bootloader offset
+          # is 0x2000 on the P4, not 0x0 as on the S3 -- esptool's own esp32p4.py sets
+          # BOOTLOADER_FLASH_OFFSET = 0x2000 because the first two sectors are reserved.
+          # boot_app0 is shared: it is chip-independent and both boards use the same
+          # partition layout.
           P=.pio/build/esp32-p4-lcd-4c
+          cp "$P/bootloader.bin"  site/p4-bootloader.bin
+          cp "$P/partitions.bin"  site/p4-partitions.bin
+          cp "$P/firmware.bin"    site/p4-firmware.bin
+
+          # ...and a plain application image for the device's own OTA page, which is how
+          # you update a board that is already running rather than reflashing it.
           cp "$P/firmware.bin"    site/SkyGlass-esp32p4-firmware.bin
-          cp "$P/bootloader.bin"  site/SkyGlass-esp32p4-bootloader.bin
-          cp "$P/partitions.bin"  site/SkyGlass-esp32p4-partitions.bin
 
       - uses: actions/upload-pages-artifact@v3
         with:

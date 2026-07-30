@@ -163,10 +163,9 @@ Each board answers to its own name on the network — `skyglass-s3.local` and
 1. Open the **[web flasher](https://silentwolf75.github.io/skyglass/)** in Chrome or Edge.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
 
-> The browser flasher serves the **ESP32-S3** build. For the P4 board, download
-> `SkyGlass-esp32p4-firmware.bin` from the same page and either upload it on the device's
-> own **Firmware update** page, or write it with
-> `esptool --chip esp32p4 write_flash 0x10000 SkyGlass-esp32p4-firmware.bin`.
+> Works for **both boards** — the installer detects the chip and picks the matching
+> build. To update a device that is already running, its own **Firmware update** page takes
+> `SkyGlass-esp32p4-firmware.bin` (or `firmware.bin` for the S3) from the same site over WiFi.
 
 > Leave **Erase device** unticked to keep your WiFi credentials, settings and uploaded alert
 > sound. Tick it for a clean install or to recover a confused device.
