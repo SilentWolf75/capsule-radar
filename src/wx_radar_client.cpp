@@ -186,6 +186,14 @@ bool wx_radar_fetch(double lat, double lon) {
     if (!net_fetch_psram(url, ADSB_USER_AGENT, &image, &imageLen, 260000, 3500, 8500)) {
         Serial.println("[wxradar] tile fetch failed"); return false;
     }
+    // A PNG that arrives short still parses its header and then fails deep inside the
+    // inflate, which reads as a decoder bug. Say up front whether the payload is whole.
+    {
+        static const uint8_t kIend[8] = { 'I','E','N','D',0xAE,0x42,0x60,0x82 };
+        if (imageLen < 16 || memcmp(image + imageLen - 8, kIend, 8) != 0)
+            Serial.printf("[wxradar] tile truncated: %u bytes, no IEND\n",
+                          (unsigned)imageLen);
+    }
     memset(wx_radar_back_buffer(), 0, WX_RADAR_SIZE * WX_RADAR_SIZE * sizeof(uint16_t));
     s_decodedPixels = 0;
     s_sourcePixels = 0;

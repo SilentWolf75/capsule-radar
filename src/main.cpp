@@ -2022,10 +2022,12 @@ void loop() {
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
-            snprintf(net, sizeof(net), "Configure at\nskyglass.local\n%s  |  %.5f, %.5f",
+            // The mDNS name is per-board (two SkyGlasses on one network would otherwise
+            // fight over the same address), so print the one this board actually answers to.
+            snprintf(net, sizeof(net), "Configure at\n" BOARD_HOSTNAME ".local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
         else
-            snprintf(net, sizeof(net), "WiFi setup:\njoin SkyGlass-Setup");
+            snprintf(net, sizeof(net), "WiFi setup:\njoin " BOARD_SETUP_AP);
         ui_set_netinfo(net);
         const bool bpresent = battery_present();
         ui_set_battery(battery_percent(), battery_charging(), bpresent);

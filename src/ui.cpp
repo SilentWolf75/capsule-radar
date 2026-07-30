@@ -17,6 +17,7 @@
 #include "airports.h"
 #include "geo.h"
 #include "config.h"
+#include "p4_theme.h"
 #include <lvgl.h>
 #include <WiFi.h>
 #include <stdio.h>
@@ -74,10 +75,12 @@ static lv_obj_t *s_hudGps   = nullptr;   // HUD satellite icon (hidden unless GP
 static lv_obj_t *s_statsGps = nullptr;   // Stats view GPS status line
 static lv_obj_t *s_weatherNow = nullptr, *s_weatherMeta = nullptr, *s_weatherDays = nullptr;
 static lv_obj_t *s_wxCanvas = nullptr, *s_wxStatus = nullptr, *s_wxAirport = nullptr;
-static lv_obj_t *s_wxFooter = nullptr, *s_wxMeta = nullptr, *s_wxAttrib = nullptr;
+static lv_obj_t *s_wxAttrib = nullptr;
 static lv_obj_t *s_wxRings[3] = { nullptr, nullptr, nullptr };
-static lv_obj_t *s_wxNorth = nullptr, *s_wxCenter = nullptr, *s_wxRange = nullptr;
-static lv_obj_t *s_weatherModeBtn = nullptr, *s_weatherModeLbl = nullptr;
+static lv_obj_t *s_wxNorth = nullptr, *s_wxCenter = nullptr;
+static lv_obj_t *s_wxRingLbl[3] = { nullptr, nullptr, nullptr };   // range at each ring
+static lv_obj_t *s_wxModeLbl[3] = { nullptr, nullptr, nullptr };   // left mode rail
+static lv_obj_t *s_wxOnline = nullptr;                             // source status dot
 static lv_obj_t *s_weatherTitle = nullptr;
 enum WeatherViewMode { WEATHER_RADAR, WEATHER_CLOUDS, WEATHER_FORECAST };
 static WeatherViewMode s_weatherMode = WEATHER_RADAR;
@@ -174,7 +177,10 @@ static const char *dist_unit_caps(void) { return s_units == 0 ? "NM" : (s_units 
 
 // Coverage radius of each imagery product. These are properties of the source data
 // (RainViewer tile span, EUMETSAT crop), so they live in km and convert for display.
-#define WX_RADAR_RANGE_KM   75.0f
+// The RainViewer zoom-7 tile spans about 107 km across its 512 px; the view's range is
+// whatever fraction of that tile we display.
+#define WX_RADAR_SOURCE_KM  106.7f
+#define WX_RADAR_RANGE_KM   (WX_RADAR_SOURCE_KM * (float)WX_RADAR_SIZE / (float)WX_RADAR_SOURCE_SIZE)
 #define WX_CLOUD_RANGE_KM  200.0f
 
 static float weather_temp(float c) { return s_units == 2 ? c * 1.8f + 32.0f : c; }
@@ -269,7 +275,14 @@ static void refresh_card(void) {
 
     char title[64];
     const char *typeStr = in.type[0] ? in.type : (haveReg && regType[0] ? regType : "");
-    if (haveReg && reg[0] && typeStr[0])
+    // General aviation transmits the registration as the callsign, so the two columns
+    // were printing the same string twice ("N113KR  N113KR  P28A"). Show it once.
+    const bool regIsCall = haveReg && reg[0] && in.call[0] && strcasecmp(reg, in.call) == 0;
+    if (regIsCall && typeStr[0])
+        snprintf(title, sizeof(title), "%s  %s", in.call, typeStr);
+    else if (regIsCall)
+        snprintf(title, sizeof(title), "%s", in.call);
+    else if (haveReg && reg[0] && typeStr[0])
         snprintf(title, sizeof(title), "%s  %s  %s", in.call[0] ? in.call : "-", reg, typeStr);
     else if (haveReg && reg[0])
         snprintf(title, sizeof(title), "%s  %s", in.call[0] ? in.call : "-", reg);
@@ -360,7 +373,10 @@ static void refresh_card(void) {
         if (s_photoCredit) {
             const bool done = in.hex[0] && photo_done(in.hex);
             lv_label_set_text(s_photoCredit, done ? "No photo available" : "Loading photo...");
-            lv_obj_align(s_photoCredit, LV_ALIGN_CENTER, UI_S(0), UI_S(-104));   // where the photo would sit
+            // Sit it just above the card, where the photo itself lands. A fixed offset
+            // from centre put it adrift in the middle of the map on a larger panel.
+            lv_obj_update_layout(s_card);
+            lv_obj_align_to(s_photoCredit, s_card, LV_ALIGN_OUT_TOP_MID, 0, UI_S(-8));
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -710,13 +726,20 @@ static void build_stats(void) {
     lv_label_set_text(s_statsLbl, st);
 }
 
+// The status text changes length with the mode and the data state, so the dot has to be
+// re-hung after every text change -- lv_obj_align_to is a one-shot measurement.
+static void wx_place_online_dot(void) {
+    if (!s_wxOnline || !s_wxAttrib) return;
+    lv_obj_update_layout(s_wxAttrib);
+    lv_obj_align_to(s_wxOnline, s_wxAttrib, LV_ALIGN_OUT_LEFT_MID, -UI_S(6), 0);
+}
+
 static void build_weather(void) {
-    if (!s_weatherNow || !s_weatherMeta || !s_weatherDays || !s_wxFooter) return;
+    if (!s_weatherNow || !s_weatherMeta || !s_weatherDays) return;
     WeatherSnapshot w;
     if (!weather_get(w)) {
         lv_label_set_text(s_weatherNow, "Forecast unavailable");
         lv_label_set_text(s_weatherMeta, "Waiting for WiFi data...");
-        lv_label_set_text(s_wxFooter, "WEATHER DATA PENDING");
         lv_label_set_text(s_weatherDays, "");
     } else {
         char now[96];
@@ -728,15 +751,6 @@ static void build_weather(void) {
                  weather_temp(w.feelsC), weather_temp_unit(), w.humidity,
                  weather_wind(w.windKmh), weather_wind_unit(), cardinal((float)w.windDeg), w.updated);
         lv_label_set_text(s_weatherMeta, meta);
-
-        char footer[96];
-        snprintf(footer, sizeof(footer), "%.0f %s   %s", weather_temp(w.tempC),
-                 weather_temp_unit(), weather_condition(w.code));
-        lv_label_set_text(s_wxFooter, footer);
-        char wxmeta[96];
-        snprintf(wxmeta, sizeof(wxmeta), "WIND %s %.0f %s   HUM %d%%",
-                 cardinal((float)w.windDeg), weather_wind(w.windKmh), weather_wind_unit(), w.humidity);
-        lv_label_set_text(s_wxMeta, wxmeta);
 
         char current[24];
         snprintf(current, sizeof(current), "%.0f %s", weather_temp(w.tempC), weather_temp_unit());
@@ -806,29 +820,58 @@ static void build_weather(void) {
     else
         haveImage = wx_radar_front(&radarPixels, &frameTime, &rlat, &rlon, &version);
     const uint16_t *pixels = cloudMode ? cloudPixels : radarPixels;
+    const float rangeVal = dist_val(cloudMode ? WX_CLOUD_RANGE_KM : WX_RADAR_RANGE_KM);
+    const char *rangeUnit = dist_unit_caps();
+    char apt[72];
+    // Each ring is labelled with the range it stands for, the way a real scope is.
+    for (int i = 0; i < 3; ++i) {
+        if (!s_wxRingLbl[i]) continue;
+        char rl[12];
+        const float f = (i == 0) ? 1.0f : (i == 1) ? (2.0f / 3.0f) : (1.0f / 3.0f);
+        if (i == 0) snprintf(rl, sizeof(rl), "%.0f %s", rangeVal * f, rangeUnit);
+        else        snprintf(rl, sizeof(rl), "%.0f", rangeVal * f);
+        lv_label_set_text(s_wxRingLbl[i], rl);
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (!s_wxModeLbl[i]) continue;
+        const bool on = ((int)s_weatherMode == i);
+        lv_obj_set_style_text_color(s_wxModeLbl[i], on ? UI_GREEN : UI_DIM, 0);
+    }
     if (haveImage && pixels && s_wxCanvas) {
         lv_canvas_set_buffer(s_wxCanvas, (void *)pixels, WX_RADAR_SIZE, WX_RADAR_SIZE, LV_IMG_CF_TRUE_COLOR);
         lv_obj_clear_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
+        // The image is opaque and covers the whole scope, so it has to stay at the very
+        // back or it paints over the range rings -- which is exactly what it did: the
+        // rings survived on black sky and vanished wherever a cell crossed them.
+        lv_obj_move_background(s_wxCanvas);
+        // Restack the overlay from the image up: scope marks first, then the chrome.
+        for (lv_obj_t *o : { s_wxRings[0], s_wxRings[1], s_wxRings[2],
+                             s_wxRingLbl[0], s_wxRingLbl[1], s_wxRingLbl[2],
+                             s_wxNorth, s_wxCenter, s_wxAirport, s_wxAttrib })
+            if (o) lv_obj_move_foreground(o);
         lv_obj_add_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(s_wxCanvas);
-        char iata[6]; float d = 0, b = 0;
-        if (airports_nearest_iata(rlat, rlon, 200.0f, iata, &d, &b)) {
-            char apt[64];
-            snprintf(apt, sizeof(apt), "O  %s   %.0f %s %s", iata, dist_val(d), dist_unit(), cardinal(b));
-            lv_label_set_text(s_wxAirport, apt);
-        } else lv_label_set_text(s_wxAirport, "RADAR CENTRE");
         char stamp[12] = "--:--";
         time_t ft = (time_t)frameTime; struct tm ti;
         if (frameTime && localtime_r(&ft, &ti))
             ui_format_clock(stamp, sizeof(stamp), ti.tm_hour, ti.tm_min, true);
-        char attr[64];
-        snprintf(attr, sizeof(attr), cloudMode ? "SAT %s  |  EUMETSAT" : "RADAR %s  |  RAINVIEWER", stamp);
-        lv_label_set_text(s_wxAttrib, attr);
+        char iata[6]; float d = 0, b = 0;
+        if (airports_nearest_iata(rlat, rlon, 200.0f, iata, &d, &b))
+            snprintf(apt, sizeof(apt), "%s  %.0f %s %s   UPDATED %s",
+                     iata, dist_val(d), dist_unit(), cardinal(b), stamp);
+        else
+            snprintf(apt, sizeof(apt), "RADAR CENTRE   UPDATED %s", stamp);
+        lv_label_set_text(s_wxAirport, apt);
+        lv_label_set_text(s_wxAttrib, cloudMode ? "EUMETSAT" : "RAINVIEWER");
+        if (s_wxOnline) lv_obj_set_style_bg_color(s_wxOnline, UI_GREEN, 0);
+        wx_place_online_dot();
     } else {
         if (s_wxCanvas) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_wxAirport, "RADAR CENTRE");
-        lv_label_set_text(s_wxAttrib, cloudMode ? "WAITING FOR SATELLITE DATA" : "WAITING FOR RADAR DATA");
+        lv_label_set_text(s_wxAirport, "RADAR CENTRE   NO FRAME YET");
+        lv_label_set_text(s_wxAttrib, cloudMode ? "EUMETSAT  --  NO DATA" : "RAINVIEWER  --  NO DATA");
+        if (s_wxOnline) lv_obj_set_style_bg_color(s_wxOnline, UI_DIM, 0);
+        wx_place_online_dot();
     }
 
     lv_obj_t *forecastObjs[] = {
@@ -841,9 +884,10 @@ static void build_weather(void) {
         s_fcDayTemp[0], s_fcDayTemp[1], s_fcDayTemp[2],
         s_fcDayRain[0], s_fcDayRain[1], s_fcDayRain[2]
     };
-    lv_obj_t *radarObjs[] = { s_wxCanvas, s_wxStatus, s_wxAirport, s_wxFooter, s_wxMeta,
-                              s_wxAttrib, s_wxNorth, s_wxCenter, s_wxRange,
-                              s_wxRings[0], s_wxRings[1], s_wxRings[2] };
+    lv_obj_t *radarObjs[] = { s_wxCanvas, s_wxStatus, s_wxAirport, s_wxAttrib, s_wxOnline,
+                              s_wxNorth, s_wxCenter,
+                              s_wxRings[0], s_wxRings[1], s_wxRings[2],
+                              s_wxRingLbl[0], s_wxRingLbl[1], s_wxRingLbl[2] };
     for (lv_obj_t *o : forecastObjs) if (o) {
         if (forecastMode) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
@@ -851,17 +895,22 @@ static void build_weather(void) {
         if (forecastMode) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
     if (!forecastMode && haveImage) lv_obj_add_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
-    if (!forecastMode && !haveImage) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
-    char wxRng[16];
-    snprintf(wxRng, sizeof(wxRng), "%.0f %s",
-             dist_val(cloudMode ? WX_CLOUD_RANGE_KM : WX_RADAR_RANGE_KM), dist_unit_caps());
-    lv_label_set_text(s_wxRange, wxRng);
-    lv_label_set_text(s_weatherModeLbl,
-        s_weatherMode == WEATHER_RADAR ? "CLOUDS" :
-        s_weatherMode == WEATHER_CLOUDS ? "3-DAY FORECAST" : "WX RADAR");
+    if (!forecastMode && !haveImage) {
+        lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
+        // The crosshair annotates the image; with no image it has nothing to annotate
+        // and only crowds the ACQUIRING placeholder.
+        if (s_wxCenter) lv_obj_add_flag(s_wxCenter, LV_OBJ_FLAG_HIDDEN);
+    }
     if (s_weatherTitle) lv_label_set_text(s_weatherTitle,
         s_weatherMode == WEATHER_RADAR ? "WX RADAR" :
         s_weatherMode == WEATHER_CLOUDS ? "SAT CLOUDS" : "WEATHER");
+}
+
+static void weather_mode_pick_cb(lv_event_t *e) {
+    // The rail names the three modes outright instead of making you cycle through them.
+    const int want = (int)(intptr_t)lv_event_get_user_data(e);
+    s_weatherMode = (WeatherViewMode)want;
+    build_weather();
 }
 
 static void weather_mode_cb(lv_event_t *) {
@@ -1041,6 +1090,64 @@ void ui_track_selected(bool on) {
 static lv_obj_t *s_tileFires = nullptr, *s_fireLayer = nullptr;
 static lv_obj_t *s_fireTitle = nullptr, *s_fireBadge = nullptr, *s_fireInfo = nullptr, *s_fireBack = nullptr;
 static uint32_t  s_fireSeen = 0;
+static lv_obj_t *s_fireRegion[4] = { nullptr, nullptr, nullptr, nullptr };  // TOP REGIONS
+static lv_obj_t *s_fireTrend = nullptr, *s_fireTrendLbl = nullptr;          // detection trend
+
+// Detection totals from the last dozen refreshes. The API hands back a snapshot with no
+// history, so the trend line is built from what this device has actually seen since it
+// booted -- honest, if short, and it costs 48 bytes.
+#define FIRE_TREND_N 12
+static uint16_t s_fireHist[FIRE_TREND_N] = { 0 };
+static uint8_t  s_fireHistLen = 0;
+
+// Coarse boxes, not a geocoder: enough to say where the continent is burning. Checked in
+// order, so the tighter boxes come first.
+struct FireRegion { const char *name; float south, north, west, east; };
+static const FireRegion kFireRegions[] = {
+    { "ALASKA",        54.0f,  72.0f, -170.0f, -130.0f },
+    { "W CANADA",      49.0f,  70.0f, -140.0f,  -95.0f },
+    { "E CANADA",      44.0f,  70.0f,  -95.0f,  -52.0f },
+    { "PACIFIC NW",    42.0f,  49.0f, -125.0f, -110.0f },
+    { "CALIFORNIA",    32.0f,  42.0f, -125.0f, -114.0f },
+    { "SOUTHWEST",     31.0f,  42.0f, -114.0f, -102.0f },
+    { "GREAT PLAINS",  30.0f,  49.0f, -102.0f,  -90.0f },
+    { "SOUTHEAST",     24.0f,  37.0f,  -90.0f,  -75.0f },
+    { "NORTHEAST",     37.0f,  48.0f,  -85.0f,  -66.0f },
+    { "MEXICO",        14.0f,  32.0f, -118.0f,  -86.0f },
+    { "CENTRAL AM",     6.0f,  18.0f,  -93.0f,  -77.0f },
+    { "CARIBBEAN",     16.0f,  27.0f,  -85.0f,  -60.0f },
+};
+
+static void fire_trend_draw_cb(lv_event_t *e) {
+    if (s_fireHistLen < 2) return;
+    lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_area_t box; lv_obj_get_coords(o, &box);
+    const lv_coord_t w = lv_area_get_width(&box), h = lv_area_get_height(&box);
+
+    uint16_t lo = 0xFFFF, hi = 0;
+    for (int i = 0; i < s_fireHistLen; ++i) {
+        if (s_fireHist[i] < lo) lo = s_fireHist[i];
+        if (s_fireHist[i] > hi) hi = s_fireHist[i];
+    }
+    if (hi == lo) hi = (uint16_t)(lo + 1);          // a flat line still needs a range
+
+    lv_draw_line_dsc_t ln;
+    lv_draw_line_dsc_init(&ln);
+    ln.color = lv_color_hex(0xFBBF24);
+    ln.width = UI_S(2);
+    ln.opa = 230;
+    ln.round_start = ln.round_end = 1;
+
+    lv_point_t prev;
+    for (int i = 0; i < s_fireHistLen; ++i) {
+        lv_point_t pt;
+        pt.x = box.x1 + (lv_coord_t)((int32_t)w * i / (s_fireHistLen - 1 ? s_fireHistLen - 1 : 1));
+        pt.y = box.y1 + h - (lv_coord_t)((int32_t)h * (s_fireHist[i] - lo) / (hi - lo));
+        if (i) lv_draw_line(d, &ln, &prev, &pt);
+        prev = pt;
+    }
+}
 
 static void fire_draw_cb(lv_event_t *e) {
     lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
@@ -1153,6 +1260,49 @@ static void build_fires(void) {
     else            snprintf(info, sizeof(info), "%d detections  %s  %d areas",
                              total, LV_SYMBOL_BULLET, cells);
     lv_label_set_text(s_fireInfo, info);
+
+    // Rank the coarse regions by detections so the screen says *where*, not just how many.
+    {
+        uint32_t hits[sizeof(kFireRegions) / sizeof(kFireRegions[0])] = { 0 };
+        const int nReg = (int)(sizeof(kFireRegions) / sizeof(kFireRegions[0]));
+        for (int i = 0; i < cells; ++i) {
+            FireCell c;
+            if (!firemap_cell(i, &c)) continue;
+            for (int r = 0; r < nReg; ++r) {
+                const FireRegion &g = kFireRegions[r];
+                if (c.lat >= g.south && c.lat <= g.north && c.lon >= g.west && c.lon <= g.east) {
+                    hits[r] += c.count ? c.count : 1;
+                    break;
+                }
+            }
+        }
+        bool used[sizeof(kFireRegions) / sizeof(kFireRegions[0])] = { false };
+        for (int slot = 1; slot < 4; ++slot) {
+            int best = -1;
+            for (int r = 0; r < nReg; ++r)
+                if (!used[r] && hits[r] && (best < 0 || hits[r] > hits[best])) best = r;
+            if (!s_fireRegion[slot]) continue;
+            if (best < 0) { lv_label_set_text(s_fireRegion[slot], ""); continue; }
+            used[best] = true;
+            char row[32];
+            snprintf(row, sizeof(row), "%s  %lu", kFireRegions[best].name,
+                     (unsigned long)hits[best]);
+            lv_label_set_text(s_fireRegion[slot], row);
+        }
+    }
+
+    // One sample per refresh, oldest dropped.
+    if (total > 0) {
+        if (s_fireHistLen < FIRE_TREND_N) {
+            s_fireHist[s_fireHistLen++] = (uint16_t)total;
+        } else {
+            memmove(s_fireHist, s_fireHist + 1, sizeof(uint16_t) * (FIRE_TREND_N - 1));
+            s_fireHist[FIRE_TREND_N - 1] = (uint16_t)total;
+        }
+        if (s_fireTrend) lv_obj_invalidate(s_fireTrend);
+    }
+    if (s_fireTrendLbl)
+        lv_label_set_text(s_fireTrendLbl, zoomed ? "VIIRS" : "MODIS");
 
     // Reproject the coastline and borders only when the view actually changed
     static double pw = 1e9, ps = 1e9, pe = 1e9, pn = 1e9;
@@ -1297,7 +1447,7 @@ static void build_about(void) {
              "#63D8FF BOARD#   %s\n"
              "#63D8FF CHIP#    %s : %uMB PSRAM\n"
              "         %uMB flash : %u MHz\n"
-             "#63D8FF HOST#    skyglass.local\n"
+             "#63D8FF HOST#    " BOARD_HOSTNAME ".local\n"
              "#63D8FF IP#      %s\n"
              "#63D8FF UPTIME#  %luh %lum\n"
              "#63D8FF FEED#    airplanes.live / adsb.lol\n"
@@ -1360,6 +1510,68 @@ static lv_obj_t *make_round_panel(lv_obj_t *parent) {
     lv_obj_set_style_clip_corner(p, true, 0);
     lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
     return p;
+}
+
+// ------------------------------------------------- shared screen chrome
+// A multi-hue ring around the rim and a static starfield behind the content. LVGL 8
+// cannot gradient-fill an arc, so the sweep is built from discrete segments; at this
+// radius the steps read as a gradient. Neither is applied to the aircraft scope -- that
+// screen repaints its whole face every frame for the sweep and cannot spare the work.
+static void add_bezel(lv_obj_t *parent, const uint32_t *hues, int n) {
+    for (int i = 0; i < n; ++i) {
+        lv_obj_t *a = lv_arc_create(parent);
+        lv_obj_remove_style_all(a);
+        lv_obj_set_size(a, UI_S(444), UI_S(444));
+        lv_obj_center(a);
+        lv_arc_set_rotation(a, 0);
+        // One degree of overlap: adjacent segments otherwise leave a hairline seam.
+        lv_arc_set_bg_angles(a, (360 * i) / n, (360 * (i + 1)) / n + 1);
+        lv_obj_set_style_arc_color(a, lv_color_hex(hues[i]), LV_PART_MAIN);
+        lv_obj_set_style_arc_width(a, UI_S(5), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(a, 225, LV_PART_MAIN);
+        lv_obj_clear_flag(a, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_move_background(a);
+    }
+}
+
+// Stars come from a fixed LCG rather than rand(), so the same sky is drawn on every
+// repaint -- a re-rolled field would shimmer each time the panel invalidates.
+static void starfield_draw_cb(lv_event_t *e) {
+    lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_area_t box; lv_obj_get_coords(o, &box);
+    const lv_coord_t w = lv_area_get_width(&box), h = lv_area_get_height(&box);
+    const lv_coord_t cx = box.x1 + w / 2, cy = box.y1 + h / 2;
+    const int32_t rr = (int32_t)(w / 2 - UI_S(10)) * (int32_t)(h / 2 - UI_S(10));
+
+    lv_draw_rect_dsc_t star;
+    lv_draw_rect_dsc_init(&star);
+    star.radius = LV_RADIUS_CIRCLE;
+    star.bg_color = lv_color_hex(0xBFD8FF);
+
+    uint32_t seed = 0x51A7C0DE;
+    for (int i = 0; i < 110; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const lv_coord_t x = box.x1 + (lv_coord_t)((seed >> 8) % (uint32_t)w);
+        seed = seed * 1664525u + 1013904223u;
+        const lv_coord_t y = box.y1 + (lv_coord_t)((seed >> 8) % (uint32_t)h);
+        const int32_t dx = x - cx, dy = y - cy;
+        if ((int32_t)dx * dx + (int32_t)dy * dy > rr) continue;   // stay inside the face
+        const int mag = (int)((seed >> 20) & 3);
+        star.bg_opa = (lv_opa_t)(45 + mag * 45);
+        const lv_coord_t r = (mag == 3) ? UI_S(2) : UI_S(1);
+        lv_area_t a = { (lv_coord_t)(x - r), (lv_coord_t)(y - r),
+                        (lv_coord_t)(x + r), (lv_coord_t)(y + r) };
+        lv_draw_rect(d, &star, &a);
+    }
+}
+
+static void add_starfield(lv_obj_t *panel) {
+    lv_obj_add_event_cb(panel, starfield_draw_cb, LV_EVENT_DRAW_MAIN_END, nullptr);
+}
+
+static void goto_view_cb(lv_event_t *e) {
+    ui_show_view((int)(intptr_t)lv_event_get_user_data(e));
 }
 
 static void build_card(void) {
@@ -1959,6 +2171,17 @@ void ui_create(void) {
 
     // --- weather tile (current conditions + next three days) ---
     lv_obj_t *wp = make_round_panel(s_tileWeather);
+#if defined(BOARD_WAVESHARE_P4_LCD_4C)
+    lv_obj_add_event_cb(wp, [](lv_event_t *e) {
+        lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+        p4_draw_neon_bezel(d, P4_SCREEN_WX_RADAR);
+        p4_draw_wx_radar_chrome(d, "MCI", 36.0f);
+    }, LV_EVENT_DRAW_MAIN, nullptr);
+#endif
+    static const uint32_t kWxBezel[8] = { 0x1D4ED8, 0x2563EB, 0x3B82F6, 0x38BDF8,
+                                          0x8B5CF6, 0xA855F7, 0x6366F1, 0x1E40AF };
+    add_bezel(wp, kWxBezel, 8);
+    add_starfield(wp);
     lv_obj_set_style_bg_color(wp, lv_color_black(), 0); // hide square radar-tile bounds on AMOLED
     s_weatherTitle = make_tile_title(wp, "WX RADAR");
     lv_obj_set_style_bg_color(s_weatherTitle, lv_color_black(), 0);
@@ -2001,17 +2224,18 @@ void ui_create(void) {
     s_wxAirport = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxAirport, F14(), 0);
     lv_obj_set_style_text_color(s_wxAirport, UI_SOFT, 0);
-    lv_obj_set_style_bg_color(s_wxAirport, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_wxAirport, 160, 0);
-    lv_obj_set_style_pad_left(s_wxAirport, 6, 0);
-    lv_obj_set_style_pad_right(s_wxAirport, 6, 0);
-    lv_obj_set_style_radius(s_wxAirport, 6, 0);
     lv_label_set_text(s_wxAirport, "RADAR CENTRE");
-    lv_obj_align(s_wxAirport, LV_ALIGN_TOP_MID, UI_S(0), UI_S(46));
+    // Everything below is placed relative to the radar image, which is a fixed
+    // WX_RADAR_SIZE bitmap (the fetched tile's resolution, not a layout size). Centring
+    // it on the panel keeps the overlay aligned whatever the screen.
+    const int wxTop = SCREEN_CY - WX_RADAR_SIZE / 2;
+    // The centre readout is a header line, not part of the image: it belongs under the
+    // title. Hanging it off wxTop pushed it into the title once the image grew.
+    lv_obj_align(s_wxAirport, LV_ALIGN_TOP_MID, 0, UI_S(46));
 
     s_wxCanvas = lv_canvas_create(wp);
     lv_obj_set_size(s_wxCanvas, WX_RADAR_SIZE, WX_RADAR_SIZE);
-    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, UI_S(0), UI_S(52));
+    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, 0, wxTop);
     lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_wxCanvas, weather_mode_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
@@ -2021,67 +2245,64 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxStatus, F14(), 0);
     lv_obj_set_style_text_color(s_wxStatus, UI_DIM, 0);
     lv_label_set_text(s_wxStatus, "ACQUIRING WX RADAR...");
-    lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, UI_S(0), UI_S(222));
+    lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, 0,
+                 wxTop + WX_RADAR_SIZE / 2 - UI_S(10));
 
-    const int ringSize[3] = { 360, 240, 120 };
+    // Range rings. These were rounded-rect objects with a 1 px border and LV_RADIUS_CIRCLE,
+    // which loses whole arcs at this radius -- the top and bottom of every ring simply were
+    // not drawn (measured: 194 of 360 degrees missing on the outer one at 720 px, and the
+    // 466 px panel lost arcs too). lv_arc goes through lv_draw_arc, the same path the radar
+    // scope's rings use, and draws the full circle.
+    const int ringSize[3] = { WX_RADAR_SIZE, WX_RADAR_SIZE * 2 / 3, WX_RADAR_SIZE / 3 };
+    const int arcW = (SCREEN_W >= 600) ? 2 : 1;
     for (int i = 0; i < 3; ++i) {
-        s_wxRings[i] = lv_obj_create(wp);
-        lv_obj_remove_style_all(s_wxRings[i]);
+        s_wxRings[i] = lv_arc_create(wp);
+        lv_obj_remove_style_all(s_wxRings[i]);   // clears the knob and value arc too
         lv_obj_set_size(s_wxRings[i], ringSize[i], ringSize[i]);
-        lv_obj_align(s_wxRings[i], LV_ALIGN_TOP_MID, 0, 52 + (360 - ringSize[i]) / 2);
-        lv_obj_set_style_radius(s_wxRings[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_color(s_wxRings[i], UI_GREEN, 0);
-        lv_obj_set_style_border_opa(s_wxRings[i], i == 0 ? 180 : 90, 0);
-        lv_obj_set_style_border_width(s_wxRings[i], 1, 0);
+        lv_obj_align(s_wxRings[i], LV_ALIGN_TOP_MID, 0,
+                     wxTop + (WX_RADAR_SIZE - ringSize[i]) / 2);
+        lv_arc_set_rotation(s_wxRings[i], 0);
+        lv_arc_set_bg_angles(s_wxRings[i], 0, 360);
+        lv_obj_set_style_arc_color(s_wxRings[i], UI_GREEN, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(s_wxRings[i], i == 0 ? 180 : 110, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(s_wxRings[i], arcW, LV_PART_MAIN);
         lv_obj_clear_flag(s_wxRings[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     }
     s_wxNorth = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxNorth, F12(), 0);
     lv_obj_set_style_text_color(s_wxNorth, UI_GREEN, 0);
     lv_label_set_text(s_wxNorth, "N");
-    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, UI_S(0), UI_S(58));
+    // Just inside the outer ring, clear of the centre readout that overhangs the image.
+    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, 0, wxTop + UI_S(20));
+    // Ring range numbers, up the right-hand diagonal where a scope normally carries them.
+    for (int i = 0; i < 3; ++i) {
+        s_wxRingLbl[i] = lv_label_create(wp);
+        lv_obj_set_style_text_font(s_wxRingLbl[i], F12(), 0);
+        lv_obj_set_style_text_color(s_wxRingLbl[i], UI_GREEN, 0);
+        lv_obj_set_style_text_opa(s_wxRingLbl[i], i == 0 ? 220 : 170, 0);
+        lv_label_set_text(s_wxRingLbl[i], "");
+        const int r = ringSize[i] / 2;
+        const int off = (r * 7071) / 10000;              // r / sqrt(2): the 45 deg point
+        lv_obj_align(s_wxRingLbl[i], LV_ALIGN_TOP_MID, off + UI_S(10),
+                     SCREEN_CY - off - UI_S(8));
+    }
+
     s_wxCenter = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxCenter, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_wxCenter, UI_INK, 0);
-    lv_label_set_text(s_wxCenter, "+");
-    lv_obj_align(s_wxCenter, LV_ALIGN_TOP_MID, UI_S(0), UI_S(219));
-    s_wxRange = lv_label_create(wp);
-    lv_obj_set_style_text_font(s_wxRange, F12(), 0);
-    lv_obj_set_style_text_color(s_wxRange, UI_GREEN, 0);
-    lv_label_set_text(s_wxRange, "");            // filled by build_weather() in the chosen unit
-    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, UI_S(128), UI_S(225));
-
-    s_wxFooter = lv_label_create(wp);
-    lv_obj_set_width(s_wxFooter, UI_S(360));
-    lv_obj_set_style_text_font(s_wxFooter, F16(), 0);
-    lv_obj_set_style_text_color(s_wxFooter, UI_INK, 0);
-    lv_obj_set_style_text_align(s_wxFooter, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_wxFooter, "WEATHER DATA PENDING");
-    lv_obj_align(s_wxFooter, LV_ALIGN_TOP_MID, UI_S(0), UI_S(326));
-    lv_obj_set_style_bg_color(s_wxFooter, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_wxFooter, 185, 0);
-    lv_obj_set_style_pad_hor(s_wxFooter, 8, 0);
-    lv_obj_set_style_radius(s_wxFooter, 7, 0);
-    s_wxMeta = lv_label_create(wp);
-    lv_obj_set_width(s_wxMeta, UI_S(360));
-    lv_obj_set_style_text_font(s_wxMeta, F14(), 0);
-    lv_obj_set_style_text_color(s_wxMeta, UI_SOFT, 0);
-    lv_obj_set_style_text_align(s_wxMeta, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_wxMeta, "");
-    lv_obj_align(s_wxMeta, LV_ALIGN_TOP_MID, UI_S(0), UI_S(351));
-    lv_obj_set_style_bg_color(s_wxMeta, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_wxMeta, 185, 0);
-    lv_obj_set_style_pad_hor(s_wxMeta, 8, 0);
-    lv_obj_set_style_radius(s_wxMeta, 7, 0);
+    lv_label_set_text(s_wxCenter, "+");   // true centre of the radar image
+    lv_obj_align(s_wxCenter, LV_ALIGN_TOP_MID, 0,
+                 wxTop + WX_RADAR_SIZE / 2 - UI_S(16));
+    // Source and frame time: the only other thing on this screen, and it lives in the
+    // band between the image and the mode button so the scope stays untouched. On a panel
+    // where that band is too thin it rides the image's bottom edge instead -- still with
+    // no plate behind it, because a plate here is what broke the rings.
     s_wxAttrib = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxAttrib, F12(), 0);
     lv_obj_set_style_text_color(s_wxAttrib, UI_DIM, 0);
     lv_label_set_text(s_wxAttrib, "WAITING FOR RADAR DATA");
-    lv_obj_align(s_wxAttrib, LV_ALIGN_TOP_MID, UI_S(0), UI_S(376));
-    lv_obj_set_style_bg_color(s_wxAttrib, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_wxAttrib, 170, 0);
-    lv_obj_set_style_pad_hor(s_wxAttrib, 6, 0);
-    lv_obj_set_style_radius(s_wxAttrib, 6, 0);
+    lv_obj_align(s_wxAttrib, LV_ALIGN_TOP_MID, UI_S(7),
+                 wxTop + WX_RADAR_SIZE + UI_S(12));
 
     // Forecast mode: independent, aligned objects instead of a tiny text table.
     s_fcIcon = lv_obj_create(wp);                 // current conditions, beside the temperature
@@ -2149,20 +2370,30 @@ void ui_create(void) {
     lv_label_set_text(s_fcUpdated, "");
     lv_obj_align(s_fcUpdated, LV_ALIGN_TOP_MID, UI_S(0), UI_S(365));
 
-    s_weatherModeBtn = lv_btn_create(wp);
-    lv_obj_set_size(s_weatherModeBtn, UI_S(164), UI_S(34));
-    lv_obj_align(s_weatherModeBtn, LV_ALIGN_BOTTOM_MID, UI_S(0), UI_S(-18));
-    lv_obj_set_style_radius(s_weatherModeBtn, 17, 0);
-    lv_obj_set_style_bg_color(s_weatherModeBtn, UI_PANEL, 0);
-    lv_obj_set_style_border_color(s_weatherModeBtn, UI_GREEN, 0);
-    lv_obj_set_style_border_width(s_weatherModeBtn, 1, 0);
-    lv_obj_clear_flag(s_weatherModeBtn, LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_add_event_cb(s_weatherModeBtn, weather_mode_cb, LV_EVENT_CLICKED, nullptr);
-    s_weatherModeLbl = lv_label_create(s_weatherModeBtn);
-    lv_obj_set_style_text_font(s_weatherModeLbl, F12(), 0);
-    lv_obj_set_style_text_color(s_weatherModeLbl, UI_GREEN, 0);
-    lv_label_set_text(s_weatherModeLbl, "3-DAY FORECAST");
-    lv_obj_center(s_weatherModeLbl);
+    // Mode rail down the left edge: the three modes are named and directly selectable,
+    // where the old bottom pill only cycled and ate the band the frame time needed.
+    static const char *kModeName[3] = { "RADAR", "CLOUDS", "3-DAY" };
+    for (int i = 0; i < 3; ++i) {
+        s_wxModeLbl[i] = lv_label_create(wp);
+        lv_obj_set_style_text_font(s_wxModeLbl[i], F12(), 0);
+        lv_obj_set_style_text_color(s_wxModeLbl[i], i == 0 ? UI_GREEN : UI_DIM, 0);
+        lv_label_set_text(s_wxModeLbl[i], kModeName[i]);
+        lv_obj_align(s_wxModeLbl[i], LV_ALIGN_LEFT_MID, UI_S(12), UI_S((i - 1) * 34));
+        // A bare label is a small target; pad it out so a fingertip lands on it.
+        lv_obj_set_ext_click_area(s_wxModeLbl[i], UI_S(16));
+        lv_obj_add_flag(s_wxModeLbl[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_wxModeLbl[i], weather_mode_pick_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)i);
+    }
+
+    // Source status: a dot that goes green once a frame is actually on screen.
+    s_wxOnline = lv_obj_create(wp);
+    lv_obj_remove_style_all(s_wxOnline);
+    lv_obj_set_size(s_wxOnline, UI_S(8), UI_S(8));
+    lv_obj_set_style_radius(s_wxOnline, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_wxOnline, UI_DIM, 0);
+    lv_obj_set_style_bg_opa(s_wxOnline, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_wxOnline, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     // --- tracked tile (one flight: route, progress, ETA, live numbers) ---
     lv_obj_t *tp = make_round_panel(s_tileTracked);
@@ -2242,15 +2473,26 @@ void ui_create(void) {
     // (echoing the radar sweep), the time on the centre line, and the weather sitting
     // below a hairline rule so the two halves read as separate information.
     lv_obj_t *cp = make_round_panel(s_tileClock);
-    lv_obj_set_style_bg_color(cp, lv_color_black(), 0);   // true black: kind to the AMOLED at night
+#if defined(BOARD_WAVESHARE_P4_LCD_4C)
+    lv_obj_add_event_cb(cp, [](lv_event_t *e) {
+        lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+        p4_draw_neon_bezel(d, P4_SCREEN_CLOCK);
+        p4_draw_clock_backdrop(d);
+    }, LV_EVENT_DRAW_MAIN, nullptr);
+#endif
+    lv_obj_set_style_bg_color(cp, lv_color_hex(0x03060F), 0);   // near-black night sky
+    static const uint32_t kClockBezel[8] = { 0x22D3EE, 0x3B82F6, 0x6366F1, 0x8B5CF6,
+                                             0xD946EF, 0xF43F5E, 0xFB923C, 0x14B8A6 };
+    add_bezel(cp, kClockBezel, 8);
+    add_starfield(cp);
 
     s_clockRing = lv_obj_create(cp);                      // static outer ring, radar-like
     lv_obj_remove_style_all(s_clockRing);
     lv_obj_set_size(s_clockRing, UI_S(442), UI_S(442));
     lv_obj_center(s_clockRing);
     lv_obj_set_style_radius(s_clockRing, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_color(s_clockRing, UI_GREEN, 0);
-    lv_obj_set_style_border_opa(s_clockRing, 45, 0);
+    lv_obj_set_style_border_color(s_clockRing, lv_color_hex(0x38BDF8), 0);
+    lv_obj_set_style_border_opa(s_clockRing, 40, 0);
     lv_obj_set_style_border_width(s_clockRing, 1, 0);
     lv_obj_clear_flag(s_clockRing, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
@@ -2263,22 +2505,24 @@ void ui_create(void) {
     lv_arc_set_value(s_clockArc, 0);
     lv_obj_remove_style(s_clockArc, NULL, LV_PART_KNOB);  // no drag handle on a clock
     lv_obj_clear_flag(s_clockArc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_color(s_clockArc, UI_GREEN, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(s_clockArc, 30, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_clockArc, 4, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(s_clockArc, UI_GREEN, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(s_clockArc, 235, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(s_clockArc, 4, LV_PART_INDICATOR);
+    // Cool cyan, thin: a bright green seconds ring fought the coloured bezel for
+    // attention and won, which is not what you want a seconds hand to do.
+    lv_obj_set_style_arc_color(s_clockArc, lv_color_hex(0x38BDF8), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(s_clockArc, 22, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_clockArc, UI_S(3), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_clockArc, lv_color_hex(0x7DD3FC), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(s_clockArc, 200, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(s_clockArc, UI_S(3), LV_PART_INDICATOR);
 
     s_clockTime = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockTime, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_clockTime, UI_INK, 0);
     lv_label_set_text(s_clockTime, "--:--");
-    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, UI_S(-14), UI_S(-74));
+    lv_obj_align(s_clockTime, LV_ALIGN_CENTER, UI_S(-14), UI_S(-62));
 
     s_clockSec = lv_label_create(cp);                     // meridiem only; seconds are the arc
     lv_obj_set_style_text_font(s_clockSec, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(s_clockSec, UI_GREEN, 0);
+    lv_obj_set_style_text_color(s_clockSec, lv_color_hex(0x7DD3FC), 0);
     lv_label_set_text(s_clockSec, "");
     // Anchored to the time text, not the panel. montserrat_48 is LVGL's largest built-in
     // font so the digits cannot grow with the screen; scaling this offset instead left the
@@ -2287,16 +2531,16 @@ void ui_create(void) {
 
     s_clockDate = lv_label_create(cp);
     lv_obj_set_style_text_font(s_clockDate, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(s_clockDate, UI_SOFT, 0);
+    lv_obj_set_style_text_color(s_clockDate, lv_color_hex(0xD6E6FF), 0);
     lv_obj_set_style_text_align(s_clockDate, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(s_clockDate, "");
-    lv_obj_align(s_clockDate, LV_ALIGN_CENTER, UI_S(0), UI_S(-34));
+    lv_obj_align(s_clockDate, LV_ALIGN_TOP_MID, 0, UI_S(52));
 
     s_clockRule = lv_obj_create(cp);                      // hairline between time and weather
     lv_obj_remove_style_all(s_clockRule);
     lv_obj_set_size(s_clockRule, UI_S(150), UI_S(1));
     lv_obj_align(s_clockRule, LV_ALIGN_CENTER, UI_S(0), UI_S(-8));
-    lv_obj_set_style_bg_color(s_clockRule, UI_GREEN, 0);
+    lv_obj_set_style_bg_color(s_clockRule, lv_color_hex(0x38BDF8), 0);
     lv_obj_set_style_bg_opa(s_clockRule, 70, 0);
     lv_obj_clear_flag(s_clockRule, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
@@ -2324,7 +2568,7 @@ void ui_create(void) {
     for (int i = 0; i < 3; ++i) {
         s_clockDay[i] = lv_label_create(cp);
         lv_obj_set_style_text_font(s_clockDay[i], &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(s_clockDay[i], UI_GREEN, 0);
+        lv_obj_set_style_text_color(s_clockDay[i], lv_color_hex(0x7DD3FC), 0);
         lv_label_set_text(s_clockDay[i], "");
         lv_obj_align(s_clockDay[i], LV_ALIGN_CENTER, clkColX[i], UI_S(90));
         s_clockDayIcon[i] = lv_obj_create(cp);
@@ -2337,12 +2581,38 @@ void ui_create(void) {
         lv_label_set_text(s_clockDayTemp[i], "");
         lv_obj_align(s_clockDayTemp[i], LV_ALIGN_CENTER, clkColX[i], UI_S(146));
     }
+    // Straight to the weather screen, so the clock is not a dead end.
+    lv_obj_t *cbtn = lv_btn_create(cp);
+    lv_obj_set_size(cbtn, UI_S(150), UI_S(32));
+    lv_obj_align(cbtn, LV_ALIGN_BOTTOM_MID, 0, UI_S(-22));
+    lv_obj_set_style_radius(cbtn, 16, 0);
+    lv_obj_set_style_bg_color(cbtn, lv_color_hex(0x0A1230), 0);
+    lv_obj_set_style_border_color(cbtn, lv_color_hex(0x38BDF8), 0);
+    lv_obj_set_style_border_width(cbtn, 1, 0);
+    lv_obj_clear_flag(cbtn, LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_event_cb(cbtn, goto_view_cb, LV_EVENT_CLICKED, (void *)(intptr_t)3);
+    lv_obj_t *cbl = lv_label_create(cbtn);
+    lv_obj_set_style_text_font(cbl, F12(), 0);
+    lv_obj_set_style_text_color(cbl, lv_color_hex(0x7DD3FC), 0);
+    lv_label_set_text(cbl, "WX RADAR");
+    lv_obj_center(cbl);
+
     lv_timer_create(clock_tick_cb, 1000, nullptr);
 
     // --- fires tile (continental map) ---
     lv_obj_t *fp = make_round_panel(s_tileFires);
-    lv_obj_set_style_bg_color(fp, lv_color_black(), 0);
-    s_fireTitle = make_tile_title(fp, "FIRES");
+#if defined(BOARD_WAVESHARE_P4_LCD_4C)
+    lv_obj_add_event_cb(fp, [](lv_event_t *e) {
+        lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+        p4_draw_neon_bezel(d, P4_SCREEN_WILDFIRES);
+        p4_draw_wildfires_chrome(d, wildfire_count(), 64);
+    }, LV_EVENT_DRAW_MAIN, nullptr);
+#endif
+    lv_obj_set_style_bg_color(fp, lv_color_hex(0x07030A), 0);
+    static const uint32_t kFireBezel[8] = { 0xF97316, 0xEF4444, 0xDC2626, 0xF59E0B,
+                                            0xEA580C, 0xB91C1C, 0xF97316, 0xFBBF24 };
+    add_bezel(fp, kFireBezel, 8);
+    s_fireTitle = make_tile_title(fp, "FIRES  -  MODIS OVERVIEW");
 
     s_fireBadge = lv_label_create(fp);
     lv_obj_set_style_text_font(s_fireBadge, F12(), 0);
@@ -2365,6 +2635,46 @@ void ui_create(void) {
     lv_obj_clear_flag(s_fireLayer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_fireLayer, fire_draw_cb, LV_EVENT_DRAW_MAIN, nullptr);
     lv_obj_add_event_cb(s_fireLayer, fire_tap_cb, LV_EVENT_CLICKED, nullptr);
+
+    // TOP REGIONS, down the left the way the mockup has it.
+    static const char *kRegionHdr = "TOP REGIONS";
+    for (int i = 0; i < 4; ++i) {
+        s_fireRegion[i] = lv_label_create(fp);
+        lv_obj_set_style_text_font(s_fireRegion[i], F12(), 0);
+        lv_obj_set_style_text_color(s_fireRegion[i],
+                                    i == 0 ? lv_color_hex(0xFBBF24) : UI_SOFT, 0);
+        lv_label_set_text(s_fireRegion[i], i == 0 ? kRegionHdr : "");
+        lv_obj_set_style_bg_color(s_fireRegion[i], lv_color_hex(0x140A06), 0);
+        lv_obj_set_style_bg_opa(s_fireRegion[i], 190, 0);
+        lv_obj_set_style_pad_hor(s_fireRegion[i], UI_S(6), 0);
+        lv_obj_set_style_pad_ver(s_fireRegion[i], UI_S(3), 0);
+        lv_obj_set_style_radius(s_fireRegion[i], UI_S(5), 0);
+        lv_obj_align(s_fireRegion[i], LV_ALIGN_LEFT_MID, UI_S(10), UI_S(-46 + i * 28));
+    }
+
+    // DETECTION TREND: a sparkline of what this device has counted since boot.
+    lv_obj_t *trendHdr = lv_label_create(fp);
+    lv_obj_set_style_text_font(trendHdr, F12(), 0);
+    lv_obj_set_style_text_color(trendHdr, lv_color_hex(0xFBBF24), 0);
+    lv_label_set_text(trendHdr, "TREND");
+    lv_obj_align(trendHdr, LV_ALIGN_RIGHT_MID, UI_S(-22), UI_S(-46));
+
+    s_fireTrend = lv_obj_create(fp);
+    lv_obj_remove_style_all(s_fireTrend);
+    lv_obj_set_size(s_fireTrend, UI_S(86), UI_S(38));
+    lv_obj_align(s_fireTrend, LV_ALIGN_RIGHT_MID, UI_S(-14), UI_S(-16));
+    lv_obj_set_style_bg_color(s_fireTrend, lv_color_hex(0x140A06), 0);
+    lv_obj_set_style_bg_opa(s_fireTrend, 190, 0);
+    lv_obj_set_style_radius(s_fireTrend, UI_S(5), 0);
+    lv_obj_set_style_pad_all(s_fireTrend, UI_S(4), 0);
+    lv_obj_clear_flag(s_fireTrend, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_fireTrend, fire_trend_draw_cb, LV_EVENT_DRAW_MAIN_END, nullptr);
+
+    s_fireTrendLbl = lv_label_create(fp);
+    lv_obj_set_style_text_font(s_fireTrendLbl, F12(), 0);
+    lv_obj_set_style_text_color(s_fireTrendLbl, UI_SOFT, 0);
+    lv_label_set_text(s_fireTrendLbl, "MODIS");
+    lv_obj_align(s_fireTrendLbl, LV_ALIGN_RIGHT_MID, UI_S(-30), UI_S(16));
 
     s_fireInfo = lv_label_create(fp);
     lv_obj_set_width(s_fireInfo, UI_S(380));
