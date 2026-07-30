@@ -33,8 +33,6 @@ TOUR = [
     ("screens/detail.png",   2200),
     ("screens/list.png",     1500),
     ("screens/tracked.png",  1800),
-    ("screens/firemap.png",      1800),
-    ("screens/firemap-zoom.png", 1800),
     ("screens/wx-radar.png", 1400),
     ("screens/forecast.png", 1400),
     ("screens/clock.png",    1500),
@@ -46,6 +44,7 @@ THEMES = [
     ("theme-orb.png",      1300),
     ("theme-amber.png",    1300),
     ("theme-military.png", 1300),
+    ("theme-red.png",      1300),
 ]
 
 

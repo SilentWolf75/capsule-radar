@@ -62,9 +62,11 @@ need a third-party account are off until a key is entered on the config page.
     The scope plots **either** aircraft **or** vessels, chosen in settings — they share
     no scale, altitude or speed frame, so overlaying them reads as noise. The HUD count,
     the list view and tap targets all follow the selected mode.
-19. **Wildfire markers** — NASA FIRMS VIIRS active-fire detections within the scope,
-    sized and coloured by fire radiative power. The CSV header is parsed for column
-    positions rather than assuming a fixed order. Needs a free MAP_KEY.
+19. **Local ADS-B source** — point the feed at a dump1090 / readsb / tar1090 receiver on
+    your own network instead of the public APIs. The parser already accepted both the `ac`
+    and `aircraft` array keys, so a PiAware or ADSB Exchange feeder works unmodified. A
+    source selector chooses auto (receiver first, internet as fallback), local only, or
+    internet only.
 20. **Clock view** — a full watch face (time, seconds, weekday and date) with current
     conditions and a three-day strip. Refreshes on its own 1 s timer, only while visible.
 21. **Quiet hours** — a configurable window (wrapping midnight) that dims, blanks, or

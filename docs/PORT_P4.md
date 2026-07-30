@@ -2,26 +2,27 @@
 
 Target: **Waveshare ESP32-P4-WIFI6-Touch-LCD-4C** — 4" round IPS, 720×720, MIPI-DSI.
 
-Status: **the whole application builds for P4; nothing hardware-verified.**
-`pio run -e esp32-p4-lcd-4c` now builds `main.cpp` itself -- the ADS-B feed and task,
-the web config server, OTA, NVS, audio, GPS and every data client -- against the DSI
-panel driver and GT911 touch, at 720x720 on RISC-V. Not a UI demo any more. It has
-never run on hardware; the board is not here.
+Status: **running on hardware.** Every screen, the touch panel, the ADS-B feed, the
+weather and radar imagery, audio, the web config page and OTA all work on the real
+board. What follows keeps the pre-hardware reasoning because most of it held up, with
+the places it did not called out.
 
-Verified on this toolchain, no hardware required:
+Confirmed on the board itself:
 
-| Probe | Result |
+| Subsystem | Result |
 |---|---|
-| Arduino framework targets ESP32-P4 | works, on the platform version already pinned |
-| `WiFi` / `WiFiClientSecure` / `HTTPClient` | compile -- `esp_hosted` is transparent at the Arduino API |
-| `Preferences` / `Update` / `WebServer` / `ESPmDNS` | compile, so NVS, OTA, the config page and mDNS should port |
-| LVGL 8.4 on RISC-V at 720x720 | works |
-| Full SkyGlass UI + clients | **compiles and links**: RAM 30.8%, flash 2.47 MB |
+| MIPI-DSI panel | works — vendor init sequence + timings, PHY LDO ch3 @ 2.5 V |
+| Touch | works — the part is a Goodix **GT9271**, not a GT911 (see below) |
+| Wi-Fi via the C6 (`esp_hosted`) | works with plain `WiFi.h`, no hosted-specific init |
+| ADS-B feed, weather, RainViewer radar, EUMETSAT, photos | all fetch and render |
+| NVS, OTA, `WebServer`, mDNS (`skyglass-p4.local`) | work |
+| Audio (ES8311) | works |
+| `/shot.bmp` framebuffer capture | works — reads the DPI framebuffer back with `esp_cache_msync` |
+| Render rate | ~12 fps at 720×720 under LVGL 8's software renderer |
 
-That retires the biggest listed risk. Wi-Fi existing at all on a radio-less P4 was the
-open question; the Arduino objects are present, so the port is a display/touch problem
-rather than a networking rewrite. Compiling is not running -- the C6 must be flashed
-with hosted firmware and that can only be confirmed on the bench.
+The one thing that did *not* survive contact: the assumption that a faster SoC would
+make the sweep smoother. It is slower than the S3, and the ceiling is LVGL 8 doing all
+compositing on the CPU. See the performance note.
 
 ## What this board actually is
 
@@ -47,7 +48,7 @@ beyond a recompile — they already build for the native SDL simulator, which is
 existing proof of portability:
 
 `radar_view` · `ui` · `geo` · `aircraft_types` · `adsb_client` (parsing) · `route` ·
-`photo` · `airline` · `firemap` · `coastline` · `wildfire` · `vessel` · `map_bg` ·
+`photo` · `airline` · `coastline` · `vessel` · `map_bg` ·
 `weather` · `wx_radar` · `cloud_image` · `airports` · `updater`
 
 ## What has to be written
@@ -136,18 +137,28 @@ losing an evening to it:
 Practical consequence: **get the vendor ESP-IDF demo running first and capture its init
 sequence and timings verbatim.** Do not port timings from another panel.
 
-## Performance note
+## Performance note (measured)
 
-We spent real effort making the sweep smooth on the S3 and landed at ~10 fps with a
-fixed 3°/frame step (see `radar_view.cpp`). Do **not** assume that carries over:
+The prediction here was that the P4 "could easily be better than the S3". It is not.
+Measured with `/diag`'s `frame_ms`: **~85 ms a frame on the radar view**, about 12 fps,
+against the S3's ~10 fps at less than half the pixels.
 
-- Against it: 2.4× the pixels.
-- For it: the P4 is substantially faster, has a 2D pixel-processing accelerator, far more
-  memory bandwidth, and MIPI-DSI beats QSPI for pushing frames.
+What was tried, and what it showed:
 
-It could easily be better than the S3. Measure with `/diag`'s `step_avg` / `step_max`
-before tuning anything — that telemetry is already in place and is what found the real
-problem last time.
+| Change | Effect |
+|---|---|
+| LVGL draw buffer 40 → 160 lines | none at all — 85 ms either way, so the cost is pixel work, not chunk setup |
+| Shorter sweep trail (55° → 36°) | ~25% cheaper frames, and it looked worse: the trail is the motion blur |
+| Finer sweep tick (16 → 12 ms) | pointless — the timer then fires more than once per rendered frame |
+| Time-based sweep advance | measurably more even, and the user reported it as *more* stuttery; reverted |
+
+The remaining lever is the P4's PPA (2D pixel-processing accelerator), which LVGL 8
+cannot reach. That needs an LVGL 9 upgrade — a real piece of work, not a flag, and it
+would have to be done for both boards at once. Deliberately not started.
+
+Two lessons worth keeping: `fps` in `/diag` originally counted *draw chunks*, not
+frames, and overstated the rate 4–7×; and where a change was about how motion *looks*,
+the user's eye beat the measurement three separate times.
 
 ## Board abstraction (done)
 
@@ -155,11 +166,37 @@ Hardware specifics now live in `src/boards/`, selected by a `-D` flag:
 
 ```
 src/boards/waveshare_s3_amoled_175.h    complete, verified
-src/boards/waveshare_p4_lcd_4c.h        720×720 + I2C 7/8 confirmed; rest are -1
+src/boards/waveshare_p4_lcd_4c.h        complete, verified on hardware
 ```
 
 `config.h` keeps only app-level tunables and includes the right board header. Per the
 project rule, unconfirmed pins stay `-1` and the build fails rather than guessing.
+
+## What actually bit on the bench
+
+The predicted hazards were mostly right. These are the ones that cost real time:
+
+1. **The demo zip contains two init sequences under the same array name.** The panel
+   stayed black through five wrong hypotheses (memory guard, PSRAM draw buffer, trail
+   area, transpose buffer, colour format) before the cause turned out to be that
+   `p4_panel_init.h` had been transcribed from the wrong branch of `displays_config.h`.
+   The tell was register `0x40`: `0x00` on the 3.4" panel, `0x04` on this one. Transcribe
+   from the **SCREEN_4INCH_DSI** branch, not by matching the symbol name.
+2. **The backlight is active low.** `ledc_set_duty(..., on ? 0 : 255)`. Getting this
+   backwards looks exactly like a dead panel with a working driver.
+3. **Ordering in the DSI bring-up is not free-form.** LDO → DSI bus → DBI IO → *create
+   the DPI panel* → send the init registers → `esp_lcd_panel_init()`. Sending the init
+   registers before the DPI panel exists silently does nothing.
+4. **The touch controller is a GT9271, not a GT911.** The driver now accepts the Goodix
+   family by checking `id[0] == '9'` rather than matching `"911"`, and it must end the
+   register-address write with a STOP (`endTransmission(true)`), not a repeated START.
+5. **Framebuffer readback needs a cache sync.** `/shot.bmp` returns stale pixels without
+   `esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_DIR_M2C)` before reading the DPI buffer.
+6. **The weather image is not a layout value.** `WX_RADAR_SIZE` is the resolution of the
+   fetched tile; on a 720 panel the 360 px default left a black moat, so this board keeps
+   the full 512 px tile. Positions inside that image must be unscaled; positions of the
+   chrome around it scale with `UI_S()`. Mixing the two put the rings 28 px off the
+   canvas and dropped the centre crosshair onto the status line.
 
 ## Order of work once the board is in hand
 
@@ -168,10 +205,16 @@ project rule, unconfirmed pins stay `-1` and the build fails rather than guessin
 2. ~~Confirm the backlight pin.~~ **Done** — `ESP-IDF/06_displaypanel_3.4inch` in the
    same demo confirms GPIO26, and cross-confirms `lcd_rst = 27`, 2 DSI lanes, and the
    PHY LDO on channel 3 at 2500 mV. Every panel and touch value is now [VENDOR].
-3. Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:` on serial. The init
-   sequence and timings are already in place from the vendor demo, so this may simply
-   work; if it does not, re-extract rather than tweak.
-4. Touch should announce itself as `[gt911] found at 0x..`; fix axis mirroring in the
-   board header if the coordinates come out flipped.
-5. Prove `esp_hosted` Wi-Fi with a plain HTTPS GET before wiring the ADS-B client.
-6. Then the UI, which should largely already work.
+3. ~~Flash the `esp32-p4-lcd-4c` env and look for `[p4lcd] DSI up:`.~~ **Done** — after
+   fixing the init-sequence branch and the active-low backlight (see above).
+4. ~~Touch.~~ **Done** — announces itself as `[gt911] found at 0x5D`, product id `9271`.
+   Axis orientation from the vendor header was correct; no mirroring needed.
+5. ~~Prove `esp_hosted` Wi-Fi.~~ **Done** — plain `WiFi.h` works, and every HTTPS client
+   in the firmware runs unmodified.
+6. ~~Then the UI.~~ **Done** — `UI_S()` got the geometry close, but a screenshot pass over
+   all ten views was needed to find the collisions proportional scaling cannot fix
+   (fonts step in discrete tiers, and unscaled fixed-size images do not move with it).
+
+There is no captive portal on this board (WiFiManager needs a native PHY). Get it onto
+a network with `wifi <ssid> <password>` over serial, or join the `SkyGlass-P4-Setup`
+SoftAP; after that the web page at `skyglass-p4.local` is the way in.

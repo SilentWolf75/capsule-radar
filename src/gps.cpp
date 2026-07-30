@@ -11,9 +11,81 @@
 // Wire.setBufferSize() at runtime fragments the internal heap and kills the mbedTLS handshake
 // (the ADS-B HTTPS feed). So we cap each read to one bufferful and let the rest come next poll.
 #include "gps.h"
+#include "config.h"
 #include <Arduino.h>
-#include <Wire.h>
 #include <TinyGPS++.h>
+
+// ---------------------------------------------------------------------------------
+// Two backends behind one API. A board defines PIN_GPS_RX when it has a plain NMEA
+// module on a UART; otherwise it gets the LC76G-over-I2C path below, which is specific
+// to the Waveshare "-G" variant. Everything above this file -- the config-page toggle,
+// the centre-point logic -- is identical either way.
+// ---------------------------------------------------------------------------------
+#if defined(PIN_GPS_RX) && (PIN_GPS_RX >= 0)
+
+#define GPS_FIX_TTL_MS  70000      // how long a fix stays "valid" after the last sentence
+
+static bool        s_present = false;
+static TinyGPSPlus s_gps;
+static HardwareSerial s_ser(GPS_UART_NUM);
+
+bool gps_begin() {
+    s_ser.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+    // Presence is decided by whether NMEA actually turns up, not by the pins existing --
+    // a board with nothing plugged into the header must report "no GPS", not "broken GPS".
+    // The module emits sentences within a second or two of power-up even without a fix,
+    // so gps_poll() promotes s_present the moment it parses a valid one.
+    Serial.printf("[gps] UART%d listening on RX=%d TX=%d @ %d baud\n",
+                  (int)GPS_UART_NUM, (int)PIN_GPS_RX, (int)PIN_GPS_TX, (int)GPS_BAUD);
+    return true;
+}
+
+bool gps_present() { return s_present; }
+
+void gps_poll() {
+    // Non-blocking: drain whatever arrived since the last loop. At 9600 baud that is about
+    // one sentence per call, which costs nothing on the render core.
+    int guard = 512;                       // never let a noisy line monopolise the loop
+    while (s_ser.available() && guard-- > 0) s_gps.encode((char)s_ser.read());
+
+    // Present = at least one complete, checksum-valid sentence has been parsed. That is
+    // true well before there is a position fix, which is what we want: the screen should
+    // say "acquiring" rather than "no GPS" while the module is still finding satellites.
+    if (!s_present && s_gps.passedChecksum() > 0) {
+        s_present = true;
+        Serial.println("[gps] NMEA detected");
+    }
+
+    static uint32_t lg = 0;
+    const uint32_t now = millis();
+    if (now - lg > 8000) { lg = now;
+        // Same diagnostic ladder as the I2C path: chars=0 means nothing is arriving (check
+        // the wiring or swap TX/RX); chars>0 with fix=0 means valid data but no lock yet.
+        Serial.printf("[gps] chars=%lu sent=%lu csErr=%lu sats=%d fix=%d\n",
+                      (unsigned long)s_gps.charsProcessed(), (unsigned long)s_gps.sentencesWithFix(),
+                      (unsigned long)s_gps.failedChecksum(), (int)s_gps.satellites.value(),
+                      (int)gps_has_fix());
+    }
+}
+
+bool gps_has_fix() {
+    return s_gps.location.isValid() && s_gps.location.age() < GPS_FIX_TTL_MS;
+}
+
+bool gps_location(double *lat, double *lon) {
+    if (!gps_has_fix()) return false;
+    if (lat) *lat = s_gps.location.lat();
+    if (lon) *lon = s_gps.location.lng();
+    return true;
+}
+
+int gps_satellites() {
+    return s_gps.satellites.isValid() ? (int)s_gps.satellites.value() : 0;
+}
+
+#else   // ---------------- LC76G over the shared I2C bus (-G board variant) -------------
+
+#include <Wire.h>
 
 #define GPS_ADDR_W      0x50
 #define GPS_ADDR_R      0x54
@@ -129,3 +201,5 @@ bool gps_location(double *lat, double *lon) {
 int gps_satellites() {
     return s_gps.satellites.isValid() ? (int)s_gps.satellites.value() : 0;
 }
+
+#endif  // PIN_GPS_RX

@@ -35,6 +35,11 @@
 #define SCREEN_CX           360
 #define SCREEN_CY           360
 #define RADAR_R_OUTER_PX    337
+// Weather image. At the S3's 360 it filled only the middle half of this panel; the full
+// fetched tile fills the face and still leaves a band top and bottom for the chrome.
+#define WX_RADAR_SIZE       480
+// The full two-hour RainViewer history: 13 frames x 450 KB = 5.9 MB of 25 MB free.
+#define WX_RADAR_FRAMES     13
 #define LCD_COL_OFFSET      0
 #define LCD_ROW_OFFSET      0
 
@@ -89,6 +94,17 @@
 #define PIN_AUDIO_PA        53             // BSP_POWER_AMP_IO
 #define I2C_ADDR_AUDIO      0x18
 #define PIN_BOOT_BUTTON     -1
+
+// ---------- GNSS over UART (optional add-on) ----------
+// A plain NMEA module wired to the 40-pin expansion header (J2). GPIO20 and GPIO21 are
+// brought out there and are claimed by nothing else on this board: the panel is MIPI-DSI
+// (no GPIOs), touch and the codec sit on 7/8 and 9-13, the ESP32-C6 link uses 14-19, the
+// CH343P debug UART is 37/38 and the audio PA is 53.
+// [VENDOR] ESP32-P4-WIFI6-Touch-LCD-XC schematic, connector J2.
+#define PIN_GPS_RX          20             // P4 input  <- module TXD
+#define PIN_GPS_TX          21             // P4 output -> module RXD (unused unless we configure it)
+#define GPS_UART_NUM        1              // UART0 is the debug console
+#define GPS_BAUD            9600           // GAM-1818B-GKBD default, 8N1
 
 // ---------- Peripherals present ----------
 // No IMU, RTC or PMIC on this board: face-down sleep, battery reporting and the

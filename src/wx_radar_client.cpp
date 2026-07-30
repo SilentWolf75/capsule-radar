@@ -11,6 +11,10 @@
 #include <new>
 
 static PNG *s_png = nullptr;
+// Frames still missing after the last fetch. main() polls faster while this is non-zero
+// so the two-hour loop assembles in half a minute instead of over an hour.
+static int s_pending = 0;
+int wx_radar_backlog(void) { return s_pending; }
 static uint32_t s_decodedPixels = 0;
 static uint32_t s_sourcePixels = 0;
 static int s_minX = WX_RADAR_SOURCE_SIZE, s_minY = WX_RADAR_SOURCE_SIZE;
@@ -173,9 +177,25 @@ bool wx_radar_fetch(double lat, double lon) {
     const char *host = doc["host"] | "";
     JsonArrayConst past = doc["radar"]["past"].as<JsonArrayConst>();
     if (!host[0] || past.size() == 0) { Serial.println("[wxradar] no radar frames"); return false; }
-    JsonObjectConst latest = past[past.size() - 1].as<JsonObjectConst>();
-    const char *path = latest["path"] | "";
-    const uint32_t frameTime = latest["time"] | 0;
+
+    // Fetch ONE frame we do not already hold, newest first, so the loop's most useful
+    // frames land soonest and the backlog fills over successive polls. Downloading all
+    // thirteen in a row would monopolise the single network task and stall the live feed.
+    const char *path = nullptr;
+    uint32_t frameTime = 0;
+    int wanted = 0;
+    const int keep = wx_radar_capacity();
+    const int first = (int)past.size() > keep ? (int)past.size() - keep : 0;
+    for (int i = (int)past.size() - 1; i >= first; --i) {
+        JsonObjectConst f = past[i].as<JsonObjectConst>();
+        const uint32_t t = f["time"] | 0;
+        if (!t) continue;
+        if (wx_radar_has_frame(t)) continue;
+        ++wanted;
+        if (!path) { path = f["path"] | ""; frameTime = t; }
+    }
+    if (!path) return true;              // nothing missing: the loop is complete
+    s_pending = wanted - 1;
 
     char url[320];
     snprintf(url, sizeof(url), "%s%s/512/7/%.5f/%.5f/2/1_1.png",

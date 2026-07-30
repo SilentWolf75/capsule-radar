@@ -2,24 +2,25 @@
 
 <p align="center">
   <a href="https://silentwolf75.github.io/skyglass/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
-  <img src="https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white" alt="Board: ESP32-S3 round AMOLED">
+  <img src="https://img.shields.io/badge/boards-ESP32--S3%20%C2%B7%20ESP32--P4-E7352C?logo=espressif&logoColor=white" alt="Boards: ESP32-S3 and ESP32-P4">
   <a href="https://github.com/SilentWolf75/skyglass/releases"><img src="https://img.shields.io/github/v/tag/SilentWolf75/skyglass?label=firmware&color=7B42BC" alt="Firmware version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/code-MIT-2088FF" alt="License: MIT"></a>
   <a href="https://github.com/SilentWolf75/skyglass/stargazers"><img src="https://img.shields.io/github/stars/SilentWolf75/skyglass?style=social" alt="GitHub stars"></a>
 </p>
 
-A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75** — a round
-466×466 AMOLED with capacitive touch. It pulls nearby aircraft from a free online feed over
+A live **ADS-B aircraft radar** for round touch displays — the **Waveshare
+ESP32-S3-Touch-AMOLED-1.75** (466×466 AMOLED) and the **ESP32-P4-WIFI6-Touch-LCD-4C**
+(720×720 IPS). It pulls nearby aircraft from a free online feed over
 WiFi and plots them on a touch radar scope centred on your location: real callsigns, real
 altitudes, aircraft drawn as the type they actually are, with photos and route lookups on tap.
 
-It also does weather, a continental wildfire map, marine traffic, a clock face, and updates
-itself over WiFi.
+It also does weather radar with a two-hour loop, marine traffic, a clock face, and updates
+itself over WiFi. Point it at your own dump1090 receiver and it needs no internet at all.
 
 <p align="center">
   <img src="docs/img/tour.gif" width="340" alt="SkyGlass cycling through its screens">
 </p>
-<p align="center"><sub>Every screen, captured off the device: 18 aircraft in range over Kansas City — Delta, SkyWest, Mesa, Southwest and a NetJets bizjet — then the detail card, contact list, a tracked 767, the fire map, weather and About.</sub></p>
+<p align="center"><sub>Every screen, captured off the 720×720 panel: traffic over Kansas City, the detail card, contact list, a tracked flight, weather radar, forecast, clock and About.</sub></p>
 
 ## Screens
 
@@ -46,19 +47,20 @@ Every image on this page is the **real framebuffer from my device**, pulled over
 | <img src="docs/img/splash.png" width="240"> | <img src="docs/img/screens/about.png" width="240"> |
 | Painted per-pixel into a PSRAM canvas: gradient sky, stars, lit clouds, a live-looking scope and a banking airliner | The last screen: build date, board, chip, hostname, IP, uptime, feed and where the source lives |
 
-| Continental fire map | Tapped to zoom |
-|:---:|:---:|
-| <img src="docs/img/screens/firemap.png" width="240"> | <img src="docs/img/screens/firemap-zoom.png" width="240"> |
-| MODIS overview: 715 active fires across the US, Canada and Mexico, binned into 72 clusters and sized by fire radiative power | Tapping the Pacific Northwest re-queries the higher-resolution **VIIRS** feed for that box — 789 detections in 32 areas, with coastlines redrawn and a WHOLE MAP button to go back |
-
 ### Themes
 
 Long-press the screen to cycle, or pick one on the config page — **Phosphor**, **Orb**,
-**Amber CRT** and **Military**, all four captured on the device with the same traffic overhead:
+**Amber CRT**, **Military** and **Red CRT**, all five captured on the device:
 
 <p align="center">
-  <img src="docs/img/themes.gif" width="300" alt="The four themes cycling">
+  <img src="docs/img/themes.gif" width="300" alt="The five themes cycling">
 </p>
+
+**Military** is night-vision rather than a green repaint: every contact is one phosphor
+green and altitude reads as *brightness*, not hue. That makes the emergency ring the only
+non-green thing on the scope, and the whole screen works without relying on colour vision.
+**Red CRT** keeps dark adaptation, which is the one to leave running overnight. The scope's
+own controls — the range button, the TRACK button — follow whichever theme is active.
 
 ## Features
 
@@ -92,16 +94,25 @@ Long-press the screen to cycle, or pick one on the config page — **Phosphor**,
   a **visibility slider** (0–100%) fades the basemap live.
 - **Weather**: RainViewer precipitation radar, EUMETSAT cloud imagery, and a three-day
   Open-Meteo forecast with vector icons. Range rings honour your distance unit.
-- **Wildfire markers** (optional, free [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/) key):
-  active fire detections on the scope, sized and coloured by radiative power.
-- **Continental fire map** (same key): a whole extra screen for North America with coastlines
-  and state borders, tap-to-zoom, and a switch to VIIRS resolution when zoomed. Refreshes every
-  15 minutes.
+- **Weather radar loop**: RainViewer publishes thirteen frames at ten-minute steps, and the
+  device keeps as many as its PSRAM allows — the full **two hours** on the P4, one hour on the
+  S3 — playing them as a time-lapse with the frame time on screen. Frames arrive one per poll
+  so the live aircraft feed never stalls; the whole history is about 36 KB.
+
+### Your own ADS-B receiver
+- **Point it at a local dump1090 / readsb / tar1090** instead of the internet: a PiAware or
+  ADSB Exchange feeder on your network works as-is. Your own antenna, sub-second data, and no
+  internet dependency for traffic. One field on the config page.
+- **Source selector**: *Auto* prefers the receiver and falls back to the public feeds when it
+  is unreachable, *Local only* never touches the internet — an empty sky over your antenna
+  stays empty rather than being quietly topped up — and *Internet only* ignores the receiver.
+- **GPS** (optional): a Quectel LC76G over I2C, or any plain NMEA module on a UART, sets the
+  centre point from a live fix.
 
 ### The device itself
 - **Touch**: tap to inspect, **double-tap** to cycle range, **pinch** to zoom continuously,
   long-press to change theme. Swipe between **Radar / List / Stats / Weather / Tracked / Clock /
-  Fires / About**. Ranges run from 1 mi to 100 km.
+  About**. Ranges run from 1 mi to 100 km.
 - **Alert sounds** (ES8311 speaker): a soft cue for a new aircraft in range, an urgent one for
   emergency or military. Pick **Chime, Sonar ping, Marimba, Aircraft warning** or **Beep** per
   cue independently — or **upload your own WAV** from the config page. It's converted on the
@@ -124,16 +135,38 @@ Long-press the screen to cycle, or pick one on the config page — **Phosphor**,
 
 ## Hardware
 
-Waveshare **[ESP32-S3-Touch-AMOLED-1.75](https://www.amazon.com/dp/B0F886SYQ6)**
-(ASIN `B0F886SYQ6`): ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300**
-AMOLED over QSPI, **CST9217** touch, **QMI8658** IMU, **PCF85063** RTC, **AXP2101** PMIC,
-**ES8311** audio + speaker, microSD. All pins live in [`src/config.h`](src/config.h), taken from
-the board definition rather than guessed.
+Two boards, one firmware. Pick the environment that matches yours; everything above works
+on both.
+
+**[ESP32-S3-Touch-AMOLED-1.75](https://www.amazon.com/dp/B0F886SYQ6)** (ASIN `B0F886SYQ6`)
+— the original target. ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300** AMOLED 466×466 over
+QSPI, **CST9217** touch, **QMI8658** IMU, **PCF85063** RTC, **AXP2101** PMIC, **ES8311**
+audio + speaker, microSD. The IMU gives it face-down sleep and shake-to-refresh; the PMIC
+gives it a battery readout.
+
+**[ESP32-P4-WIFI6-Touch-LCD-4C](https://www.amazon.com/dp/B0FB9CQVRR)** (ASIN `B0FB9CQVRR`)
+— bigger and sharper. ESP32-P4 RISC-V (32 MB PSRAM, 32 MB flash), 4" IPS **720×720** over
+**MIPI-DSI**, **GT9271** touch, **ES8311** audio, microSD. The P4 has no radio of its own:
+Wi-Fi 6 comes from an onboard ESP32-C6 over SDIO, which the firmware uses through the normal
+`WiFi` API. No IMU, RTC or PMIC on this board, so those features degrade honestly rather than
+reporting made-up values. The scope is drawn at 720×720 and runs about 12 fps — smooth, but
+not faster than the smaller board; see [`docs/PORT_P4.md`](docs/PORT_P4.md) for why.
+
+Per-board pins and geometry live in [`src/boards/`](src/boards), taken from the vendor
+definitions rather than guessed; [`src/config.h`](src/config.h) keeps the app-level settings.
+
+Each board answers to its own name on the network — `skyglass-s3.local` and
+`skyglass-p4.local` — so you can run both at once without them fighting over one address.
 
 ## Flash from your browser (no toolchain)
 
 1. Open the **[web flasher](https://silentwolf75.github.io/skyglass/)** in Chrome or Edge.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
+
+> The browser flasher serves the **ESP32-S3** build. For the P4 board, download
+> `SkyGlass-esp32p4-firmware.bin` from the same page and either upload it on the device's
+> own **Firmware update** page, or write it with
+> `esptool --chip esp32p4 write_flash 0x10000 SkyGlass-esp32p4-firmware.bin`.
 
 > Leave **Erase device** unticked to keep your WiFi credentials, settings and uploaded alert
 > sound. Tick it for a clean install or to recover a confused device.
@@ -146,7 +179,8 @@ flash regardless of the erase checkbox.
 ## Build & flash (PlatformIO)
 
 ```bash
-pio run -e esp32-s3-amoled-175 -t upload
+pio run -e esp32-s3-amoled-175 -t upload     # 1.75" AMOLED board
+pio run -e esp32-p4-lcd-4c     -t upload     # 4" P4 board
 ```
 
 Serial log:
@@ -173,21 +207,23 @@ image here, never the merged one.
 
 ## Configuration
 
-Browse to `http://skyglass.local/` (or the device IP) on the same WiFi: centre point with a
+Browse to `http://skyglass-s3.local/` or `http://skyglass-p4.local/` (or the device IP) on the
+same WiFi — each board answers to its own name, so both can run at once. Centre point with a
 map picker, display range, theme, time zone, brightness, map background and visibility, aircraft
-filters, marine and wildfire layers and their API keys, quiet hours, sounds, firmware update and
-WiFi reset. Settings persist in NVS.
+filters, your local ADS-B receiver and which source to prefer, marine AIS and its key, quiet
+hours, sounds, firmware update and WiFi reset. Settings persist in NVS.
 
 ### Diagnostics
 
-`http://skyglass.local/diag` returns a health snapshot as JSON — free heap, minimum heap
+`/diag` returns a health snapshot as JSON — free heap, minimum heap
 since boot, largest contiguous internal block, free PSRAM, aircraft counts, and why the last
 photo fetch succeeded or failed. It exists so those numbers can be read over WiFi instead of
 only from a serial cable:
 
 ```json
-{"fw":"1.10.39","uptime_s":1520,"heap":110616,"heap_min":50968,"heap_largest":32756,
- "psram":5108176,"aircraft":26,"max_on_screen":120,"feed_cap":120,"fires":3,"photo":"ok"}
+{"fw":"1.15.0","uptime_s":1520,"heap":110616,"heap_min":50968,"heap_largest":32756,
+ "psram":5108176,"aircraft":26,"max_on_screen":120,"feed_cap":120,"photo":"ok",
+ "fps":12.1,"frame_ms":83}
 ```
 
 ## Screenshots
@@ -227,17 +263,15 @@ src/
   display.*          CO5300 (Arduino_GFX) + LVGL bring-up
   radar_view.*       the radar scope, aircraft, themes
   aircraft_types.*   ICAO type designator -> drawing silhouette
-  ui.*               views (radar/list/stats/weather/tracked/clock/fires), cards, HUD
+  ui.*               views (radar/list/stats/weather/tracked/clock/about), cards, HUD
   touch_cst9217.*    capacitive touch (single touch + 2-point pinch)
   adsb_client.*      airplanes.live / adsb.lol fetch + parse
   photo.* photo_client.*        airframe photos (planespotters)
   route*.* route.*              origin -> destination lookup (adsbdb)
   airline.*                     operator name (offline table)
   map_bg.* map_client.*         CARTO basemap: tile fetch, stitch, reproject
-  firemap.* firemap_client.*    continental fire map
-  wildfire.* wildfire_client.*  NASA FIRMS on-scope markers
   vessel.* ais_client.*         AIS marine traffic (aisstream.io WebSocket)
-  coastline.*        vector coastlines and borders for the fire map
+  coastline.*        vector coastlines and borders under the scope
   updater.*          self-update from GitHub Pages
   imu_qmi8658.*      accelerometer (face-down sleep)
   battery.*          AXP2101 battery gauge
@@ -274,6 +308,6 @@ polite with request cadence). Routes: **adsbdb.com**. Airframe photos: **planesp
 proxied through **images.weserv.nl** for baseline-JPEG re-encoding; each photo is credited to its
 photographer on the card and remains the property of its owner. Basemap tiles: **CARTO** /
 **OpenStreetMap** contributors. Weather: **Open-Meteo**, **RainViewer**, **EUMETSAT**. Marine
-AIS: **aisstream.io** (your own key). Active fires: **NASA FIRMS** (your own key).
+AIS: **aisstream.io** (your own key).
 
 Personal, hobby, non-commercial project.

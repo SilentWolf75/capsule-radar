@@ -1,7 +1,7 @@
 #pragma once
 // SkyGlass — build & user configuration.
 
-#define FW_VERSION "1.13.0"   // shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.15.0"   // shown on the web config page + Stats screen; bump on release
 // ---------- Board selection ----------
 // Everything hardware-specific (screen geometry, pin map, which peripherals exist)
 // lives in src/boards/<board>.h. Pick one with a -D flag in platformio.ini; the
@@ -42,11 +42,6 @@ static const float RANGE_STEPS_KM[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 
 #define WEATHER_REFRESH_MS  1800000UL      // 30 minutes; forecast data changes slowly
 #define WX_RADAR_REFRESH_MS 300000UL       // RainViewer frames update about every 5 minutes
 #define CLOUD_IMAGE_REFRESH_MS 600000UL    // EUMETSAT MTG cloud imagery; cache for 10 minutes
-#define FIRE_DAY_RANGE      2              // see wildfire_client.cpp: 1 always returns nothing
-#define FIREMAP_REFRESH_MS  900000UL       // continental fire map; a big query, poll it slowly
-#define FIREMAP_HALF_W      205            // draw box for the continental map (fits the circle)
-#define FIREMAP_HALF_H      138
-#define FIRE_REFRESH_MS     900000UL       // NASA FIRMS active fires; new satellite passes are hours apart
 
 #define LV_COLOR_DEPTH_BITS 16
 #define BRIGHTNESS_DEFAULT  200            // 0..255, panel brightness via cmd 0x51
@@ -57,6 +52,10 @@ static const float RANGE_STEPS_KM[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 
 // ---------- ADS-B API (free, non-commercial) ----------
 #define ADSB_PRIMARY_HOST   "api.airplanes.live"   // GET /v2/point/{lat}/{lon}/{radius_nm}
 #define ADSB_FALLBACK_HOST  "api.adsb.lol"          // same readsb format
+// A dump1090 / readsb / tar1090 receiver on your own network, set from the config page
+// (blank = use the public feeds). This is the path every one of those serves the decoded
+// picture on; the ADSB Exchange and PiAware images both include tar1090.
+#define ADSB_LOCAL_PATH     "/tar1090/data/aircraft.json"
 #define ADSB_USER_AGENT     "SkyGlass/1.0 (ESP32-S3 hobby; +https://github.com/SilentWolf75/skyglass)"
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
 #define ADSB_MAX_AIRCRAFT   120             // hard cap parsed per poll (protect RAM in busy areas)

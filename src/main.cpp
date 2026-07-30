@@ -13,10 +13,6 @@
 #include "photo.h"
 #include "photo_client.h"
 #include "airline.h"
-#include "wildfire.h"
-#include "wildfire_client.h"
-#include "firemap.h"
-#include "firemap_client.h"
 #include "map_bg.h"
 #include "map_client.h"
 #include "vessel.h"
@@ -46,7 +42,7 @@
 #include <Preferences.h>            // NVS (persist theme/settings)
 #include <time.h>                   // NTP/RTC clock + date
 #include <WebServer.h>              // configuration web page
-#include <ESPmDNS.h>                // http://skyglass.local
+#include <ESPmDNS.h>                // http://<board hostname>.local
 #include <ArduinoOTA.h>             // OTA firmware update over WiFi (PlatformIO/espota)
 #include <Update.h>                 // browser OTA: self-flash an uploaded .bin
 #include <esp_heap_caps.h>          // largest-free-block metric (heap health)
@@ -104,9 +100,6 @@ static int                   g_qhMode  = 0;                          // quiet ho
 static int                   g_qhStart = 22 * 60;                    // quiet-hours start, minutes since midnight (web/NVS)
 static int                   g_qhEnd   = 7 * 60;                     // quiet-hours end, minutes since midnight (web/NVS)
 static bool                  g_inQuiet = false;                      // currently inside the quiet-hours window
-static bool                  g_showFires = true;                     // FIRMS wildfire markers on/off (web/NVS)
-static String                g_firmsKey;                             // NASA FIRMS MAP_KEY (web/NVS; empty = off)
-static volatile bool         g_firesDirty = false;
 static volatile bool         g_mapDirty = false;
 static bool                  g_mapBg = false;                        // map-tile background on/off (web/NVS)
 static int                   g_mapStyle = 0;                         // 0 = dark, 1 = light (web/NVS)
@@ -114,6 +107,8 @@ static int                   g_mapOpa = 85;                          // basemap 
 static bool                  g_time24 = false;                       // false = 12-hour clock (web/NVS)
 static bool                  g_typeIcons = true;                     // per-type aircraft silhouettes (web/NVS)
 static int                   g_trafficMode = 0;                      // 0 = aircraft, 1 = marine (web/NVS)
+static int                   g_adsbSrc = 0;                          // 0 auto, 1 local only, 2 public only
+static String                g_adsbLocal;                            // dump1090/tar1090 host on the LAN ("" = public feeds)
 static String                g_aisKey;                               // aisstream.io API key (web/NVS; empty = off)
 static volatile bool         g_weatherDirty = false;
 static volatile bool         g_wxRadarDirty = false;
@@ -157,7 +152,6 @@ static void adsb_task(void*) {
     uint32_t nextWeatherAt = UINT32_MAX;       // armed five seconds after WiFi connects
     uint32_t nextWxRadarAt = UINT32_MAX;
     uint32_t nextCloudImageAt = UINT32_MAX;
-    uint32_t nextFiresAt = UINT32_MAX;
     uint32_t lastFeedOk = millis();          // self-heal: time of last good (or no-WiFi) poll
     for (;;) {
         const bool conn = (WiFi.status() == WL_CONNECTED);
@@ -171,7 +165,6 @@ static void adsb_task(void*) {
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
-            nextFiresAt = millis() + 20000UL;
             // mDNS + OTA are started on core 1 (loop) to keep all mDNS use on one core
         }
         wasConnected = conn;
@@ -246,10 +239,16 @@ static void adsb_task(void*) {
                 }
             }
             if ((int32_t)(nowMs - nextWxRadarAt) >= 0) {
-                Serial.println("[wxradar] fetching latest frame...");
                 if (wx_radar_fetch(g_settings.homeLat, g_settings.homeLon)) {
                     g_wxRadarDirty = true;
-                    nextWxRadarAt = millis() + WX_RADAR_REFRESH_MS;
+                    // One frame per call. While the loop's backlog is still coming down,
+                    // come straight back for the next one -- the whole two-hour history is
+                    // about 36 KB, so it assembles in half a minute. Once complete, settle
+                    // to the normal cadence: RainViewer only publishes a new frame every
+                    // ten minutes and the fetcher skips what it already holds.
+                    const int left = wx_radar_backlog();
+                    nextWxRadarAt = millis() + (left > 0 ? 2500UL : WX_RADAR_REFRESH_MS);
+                    if (left > 0) Serial.printf("[wxradar] %d frames to go\n", left);
                 } else {
                     nextWxRadarAt = millis() + 60000UL;
                     Serial.println("[wxradar] fetch failed; retrying in 60s");
@@ -263,19 +262,6 @@ static void adsb_task(void*) {
                 } else {
                     nextCloudImageAt = millis() + 60000UL;
                     Serial.println("[clouds] fetch failed; retrying in 60s");
-                }
-            }
-            // Active fires refresh slowly (FIRMS publishes new satellite passes a few
-            // times a day) and only when a MAP_KEY has been entered.
-            if ((int32_t)(nowMs - nextFiresAt) >= 0) {
-                if (!wildfire_has_key()) {
-                    nextFiresAt = millis() + FIRE_REFRESH_MS;   // re-check later; key may be added
-                } else if (wildfire_fetch(g_settings.homeLat, g_settings.homeLon, queryRadiusKm())) {
-                    g_firesDirty = true;
-                    nextFiresAt = millis() + FIRE_REFRESH_MS;
-                } else {
-                    nextFiresAt = millis() + 120000UL;
-                    Serial.println("[fire] fetch failed; retrying in 120s");
                 }
             }
             // AIS: non-blocking socket pump; also keeps the subscription box in sync
@@ -318,12 +304,6 @@ static void adsb_task(void*) {
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
             // Continental fire map (FIRES screen). Fetch + banded parse; returns
             // true while busy so the UI can repaint on the busy->idle edge.
-            {
-                static bool fmWasBusy = false;
-                const bool fmBusy = firemap_client_step();
-                if (fmWasBusy && !fmBusy) g_firesDirty = true;
-                fmWasBusy = fmBusy;
-            }
             // Self-update. Deliberately last in the task: a check is cheap but an
             // install streams 3 MB, and the live feed should have had its turn first.
             updater_poll();
@@ -372,22 +352,23 @@ static void loadSettings() {
     g_qhMode           = p.getInt("qhmode", 0);
     g_qhStart          = p.getInt("qhstart", 22 * 60);
     g_qhEnd            = p.getInt("qhend", 7 * 60);
-    g_showFires        = p.getBool("fires", true);
-    g_firmsKey         = p.getString("firmskey", "");
     g_mapBg            = p.getBool("mapbg", false);
     g_mapStyle         = p.getInt("mapstyle", 0);
     g_mapOpa           = p.getInt("mapopa", 85);
     g_trafficMode      = p.getInt("traffic", 0);
     g_aisKey           = p.getString("aiskey", "");
+    g_adsbLocal        = p.getString("adsblocal", "");
+    g_adsbSrc          = p.getInt("adsbsrc", 0);
     g_time24           = p.getBool("time24", false);
     g_typeIcons        = p.getBool("typeicons", true);
     g_bigText          = p.getBool("bigtext", false);
     p.end();
     ui_set_time_24h(g_time24);
-    wildfire_set_key(g_firmsKey.c_str());
     map_client_set_style(g_mapStyle);
     map_client_enable(g_mapBg);
     ais_set_key(g_aisKey.c_str());
+    g_adsb.setLocalHost(g_adsbLocal.c_str());
+    g_adsb.setSourceMode(g_adsbSrc);
     // fonts are baked into the widgets at creation time, so the large-text flag must be
     // in place before display::begin() builds the UI (loadSettings runs first in setup)
     ui_set_large_text(g_bigText);
@@ -469,6 +450,7 @@ static void saveTheme(int t) {
     p.begin("capsuleradar", false);
     p.putInt("theme", t);
     p.end();
+    ui_theme_changed();          // long-press switches live; re-tint the on-scope controls
 }
 
 // Convert a UTC broken-down time to time_t (mktime assumes local TZ, so flip to UTC0).
@@ -558,9 +540,9 @@ static void handleRoot() {
     if (!spliced) {
         ropts += fmt_opt(curRange, true);
     }
-    const char *tnames[] = {"Phosphor", "Orb", "Amber CRT", "Military"};
+    const char *tnames[] = {"Phosphor", "Orb", "Amber CRT", "Military", "Red CRT"};
     String topts;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < THEME_COUNT; ++i) {
         char o[80];
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == th ? " selected" : "", tnames[i]);
         topts += o;
@@ -597,6 +579,18 @@ static void handleRoot() {
         epopts += o;
     }
     const char *tmnames[] = {"Aircraft (ADS-B)", "Marine vessels (AIS)"};
+    // ADS-B source selector: auto prefers the local receiver but survives it going away.
+    String srcopts;
+    {
+        static const char *kSrc[3] = { "Auto (receiver, then internet)",
+                                       "Local receiver only",
+                                       "Internet feeds only" };
+        for (int i = 0; i < 3; ++i) {
+            srcopts += "<option value='" + String(i) + "'";
+            if (g_adsbSrc == i) srcopts += " selected";
+            srcopts += ">" + String(kSrc[i]) + "</option>";
+        }
+    }
     String tmopts;
     for (int i = 0; i < 2; ++i) {
         char o[80];
@@ -829,13 +823,16 @@ static void handleRoot() {
         "<div style='font-size:12px;opacity:.6;margin-top:6px'>Free key from "
         "<a href='https://aisstream.io' style='color:#9affc8'>aisstream.io</a>. "
         "Coverage is crowd-sourced, so inland locations may see nothing.</div></div>"
-        "<div class=card><div class=t>Wildfires</div>"
-        "<label><input type=checkbox class=ck %s onchange='fr(this.checked)'>Show active fire markers</label>"
-        "<label>NASA FIRMS map key</label>"
-        "<input value='%s' placeholder='paste your free FIRMS key' onchange='fk(this.value)'>"
-        "<div style='font-size:12px;opacity:.6;margin-top:6px'>Free key from "
-        "<a href='https://firms.modaps.eosdis.nasa.gov/api/map_key/' style='color:#9affc8'>"
-        "firms.modaps.eosdis.nasa.gov</a>. Without a key this layer stays empty.</div></div>"
+        "<div class=card><div class=t>Local ADS-B receiver</div>"
+        "<label>Hostname or IP (blank = use the public feeds)</label>"
+        "<input value='%s' placeholder='192.168.1.50 or myreceiver.local' onchange='lf(this.value)'>"
+        "<label>Source</label>"
+        "<select onchange='ls(this.value)'>%s</select>"
+        "<div style='font-size:12px;opacity:.6;margin-top:6px'>Point this at your own "
+        "dump1090 / readsb / tar1090 receiver &mdash; a PiAware or ADSB Exchange feeder "
+        "works as-is (they are usually reachable as <b>adsbexchange.local</b> or "
+        "<b>piaware.local</b>). Your own antenna, no internet required. Leave blank if "
+        "you do not run one.</div></div>"
         "<div class=card><div class=t>Quiet hours</div>"
         "<label>Mode</label><select onchange='qm(this.value)'>%s</select>"
         "<label>From</label><input type=time value='%02d:%02d' onchange='qs(this.value)'>"
@@ -856,19 +853,6 @@ static void handleRoot() {
         "Automatic installing is off by default &mdash; a bad published build would "
         "otherwise reach the device with no cable in reach. "
         "<a href=/update style='color:#9affc8'>Upload a .bin manually</a></div></div>"
-        // Sweep variants, on the page rather than behind a URL. Judging these means
-        // flipping between them repeatedly while watching the panel, which is intolerable
-        // if each switch costs a reflash or a hand-typed address.
-        "<div class=card><div class=t>Sweep feel</div>"
-        "<p style='color:#9affc8;font-size:13px;margin:0 0 6px'>Applies instantly. Watch the "
-        "scope and pick whichever reads smoothest.</p>"
-        "<div style='display:flex;gap:6px;flex-wrap:wrap'>"
-        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(1)\">1</button>"
-        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(2)\">2</button>"
-        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(3)\">3</button>"
-        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(4)\">4</button>"
-        "<button class=w style='flex:1;min-width:56px' onclick=\"sw(5)\">5</button>"
-        "</div><p id=swn style='color:#1dff86;font-size:12px;margin:8px 0 0'></p></div>"
         "<div class=card><div class=t>Network</div>"
 #if !BOARD_HAS_WIFIMANAGER
         // Boards without WiFiManager have no captive portal, so credential entry has to
@@ -919,7 +903,6 @@ static void handleRoot() {
         "function mx(v){fetch('/maxac?v='+v+'&save=1')}"
         "function bt(c){fetch('/bigtext?v='+(c?1:0)+'&save=1')}"
         "function ro(v){fetch('/rotate?v='+v+'&save=1')}"
-        "function sw(n){fetch('/sweeptune?p='+n).then(r=>r.text()).then(t=>{document.getElementById('swn').textContent=t})}"
         "function u(v){fetch('/units?v='+v+'&save=1')}"
         "function al(v){fetch('/alerts?mode='+v+'&save=1')}"
         "function px(v){fetch('/alerts?prox='+v+'&save=1')}"
@@ -947,11 +930,11 @@ static void handleRoot() {
         "function ti(c){fetch('/typeicons?v='+(c?1:0)+'&save=1')}"
         "function ai(v){fetch('/ais?v='+v+'&save=1')}"
         "function ak(v){fetch('/ais?key='+encodeURIComponent(v)+'&save=1')}"
+        "function lf(v){fetch('/adsblocal?h='+encodeURIComponent(v))}"
+        "function ls(v){fetch('/adsblocal?m='+v)}"
         "function mb(c){fetch('/map?v='+(c?1:0)+'&save=1')}"
         "function ms(v){fetch('/map?style='+v+'&save=1')}"
         "function mop(v,s){document.getElementById('mop-val').innerText=v+'%%';fetch('/mapopa?v='+v+(s?'&save=1':''))}"
-        "function fr(c){fetch('/fires?v='+(c?1:0)+'&save=1')}"
-        "function fk(v){fetch('/fires?key='+encodeURIComponent(v)+'&save=1')}"
         "function qm(v){fetch('/quiet?mode='+v+'&save=1')}"
         "function qs(v){fetch('/quiet?start='+encodeURIComponent(v)+'&save=1')}"
         "function qe(v){fetch('/quiet?end='+encodeURIComponent(v)+'&save=1')}"
@@ -971,14 +954,14 @@ static void handleRoot() {
         g_typeIcons ? "checked" : "",
         g_showAirports ? "checked" : "", g_hideGround ? "checked" : "", maopts.c_str(), g_milOnly ? "checked" : "",
         // order must track the HTML above: trails, max aircraft, large text, rotation,
-        // units, map, sound, traffic, wildfires, quiet hours
+        // units, map, sound, traffic, quiet hours
         tlopts.c_str(), mxopts.c_str(), g_bigText ? "checked" : "", g_rotation, uopts.c_str(),
         g_mapBg ? "checked" : "", msopts.c_str(), g_mapOpa, g_mapOpa,
         g_volume, g_muted ? "checked" : "", aopts.c_str(),
         npopts.c_str(), epopts.c_str(), popts.c_str(),
         sndStatus,
         tmopts.c_str(), g_aisKey.c_str(),
-        g_showFires ? "checked" : "", g_firmsKey.c_str(),
+        g_adsbLocal.c_str(), srcopts.c_str(),
         qopts.c_str(), g_qhStart / 60, g_qhStart % 60, g_qhEnd / 60, g_qhEnd % 60,
         updater_auto_check() ? "checked" : "", updater_auto_install() ? "checked" : "",
         g_settings.homeLat, g_settings.homeLon, (g_tz == TZ_STR ? 0 : 1));
@@ -1299,6 +1282,28 @@ static void handleAis() {   // traffic mode (aircraft vs marine) + aisstream.io 
     g_web.send(200, "text/plain", "ok");
 }
 
+static void handleAdsbLocal() {   // point the feed at a receiver on the local network
+    if (g_web.hasArg("m")) {
+        g_adsbSrc = constrain((int)g_web.arg("m").toInt(), 0, 2);
+        g_adsb.setSourceMode(g_adsbSrc);
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putInt("adsbsrc", g_adsbSrc);
+        p.end();
+    }
+    if (g_web.hasArg("h")) {
+        g_adsbLocal = g_web.arg("h");
+        g_adsbLocal.trim();
+        g_adsb.setLocalHost(g_adsbLocal.c_str());   // empty falls straight back to the public feeds
+        Preferences p;
+        p.begin("capsuleradar", false);
+        p.putString("adsblocal", g_adsbLocal);
+        p.end();
+        Serial.printf("[adsb] local receiver set to '%s'\n", g_adsbLocal.c_str());
+    }
+    g_web.send(200, "text/plain", "ok");
+}
+
 static void handleMap() {   // map-tile background: on/off + style
     if (g_web.hasArg("v")) {
         g_mapBg = g_web.arg("v").toInt() != 0;
@@ -1331,30 +1336,6 @@ static void handleMapOpa() {
             p.putInt("mapopa", g_mapOpa);
             p.end();
         }
-    }
-    g_web.send(200, "text/plain", "ok");
-}
-
-static void handleFires() {   // FIRMS wildfire markers: visibility + API key
-    if (g_web.hasArg("v")) {
-        g_showFires = g_web.arg("v").toInt() != 0;
-        radar::setFiresEnabled(g_showFires);
-    }
-    if (g_web.hasArg("key")) {
-        g_firmsKey = g_web.arg("key");
-        g_firmsKey.trim();
-        wildfire_set_key(g_firmsKey.c_str());
-        if (g_firmsKey.length() == 0) {
-            wildfire_store(nullptr, 0);          // key cleared -> drop any markers on screen
-            radar::update(g_snap, g_settings);
-        }
-    }
-    if (g_web.hasArg("save")) {
-        Preferences p;
-        p.begin("capsuleradar", false);
-        p.putBool("fires", g_showFires);
-        p.putString("firmskey", g_firmsKey);
-        p.end();
     }
     g_web.send(200, "text/plain", "ok");
 }
@@ -1505,12 +1486,6 @@ static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weath
     // is up, so it could never be captured with /shot.bmp -- the one screen that had to
     // be photographed by hand.
     if (g_web.hasArg("splash")) ui_splash_show();
-    if (g_web.hasArg("fire")) {                 // "x,y" in screen pixels, or "reset"
-        const String a = g_web.arg("fire");
-        const int comma = a.indexOf(',');
-        if (a == "reset")   ui_fire_reset();
-        else if (comma > 0) ui_fire_tap(a.substring(0, comma).toInt(), a.substring(comma + 1).toInt());
-    }
     if (g_web.hasArg("selhex")) {          // stable across polls, unlike the index
         const bool hit = radar::selectByHex(g_web.arg("selhex").c_str());
         ui_on_data_updated();
@@ -1649,7 +1624,6 @@ void setup() {
 
     loadSettings();
     updater_begin();       // restore the auto-check / auto-install preferences
-    firemap_begin();       // continental fire map starts on the default view
     route_cache_begin();   // clear stale route cache if the label format changed
 
     // --- Display + LVGL (M0) ----------------------------------------------
@@ -1676,9 +1650,9 @@ void setup() {
         g_rotation = constrain(g_rotation, 0, 359);
         p.end();
         radar::setTheme(t);
+        ui_theme_changed();          // ...and once at boot for the restored theme
         radar::setSweepEnabled(g_showSweep);
         radar::setAirportsEnabled(g_showAirports);
-        radar::setFiresEnabled(g_showFires);
         radar::setTrafficMode(g_trafficMode);
         radar::setTypeIcons(g_typeIcons);
         radar::setMapOpacity(g_mapOpa);   // the saved value never reached the LVGL layer,
@@ -1788,7 +1762,7 @@ void setup() {
     g_ac_mutex = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(adsb_task, "adsb", 16384, nullptr, 1, nullptr, 0);  // TLS needs a big stack
 
-    // configuration web page (http://skyglass.local/)
+    // configuration web page (http://<board hostname>.local/)
     g_web.on("/", handleRoot);
     g_web.on("/save", HTTP_POST, handleSave);
     g_web.on("/wifi", HTTP_POST, handleWifi);
@@ -1810,10 +1784,10 @@ void setup() {
     g_web.on("/rotate", handleRotate);
     g_web.on("/gps", handleGps);
     g_web.on("/quiet", handleQuiet);
-    g_web.on("/fires", handleFires);
     g_web.on("/map", handleMap);
     g_web.on("/mapopa", handleMapOpa);
     g_web.on("/ais", handleAis);
+    g_web.on("/adsblocal", handleAdsbLocal);
     g_web.on("/sound", HTTP_POST,
         []() {
             if (g_soundUploadOk) {
@@ -1834,61 +1808,20 @@ void setup() {
         snprintf(j, sizeof(j),
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
-                 "\"feed_cap\":%d,\"fires\":%d,\"photo\":\"%s\","
+                 "\"feed_cap\":%d,\"photo\":\"%s\","
                  "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f,\"frame_ms\":%u,"
                  "\"lvgl_ms\":%.1f,\"rest_ms\":%.1f}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
-                 ADSB_MAX_AIRCRAFT, wildfire_count(), photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs(), g_loopLvglMs, g_loopRestMs);
+                 ADSB_MAX_AIRCRAFT, photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs(), g_loopLvglMs, g_loopRestMs);
         g_web.send(200, "application/json", j);
     });
     g_web.on("/fwupd", handleFwUpd);
     g_web.on("/shot.bmp", handleShot);
     // Numbered sweep variants, switchable live. Two rounds of tuning by measurement made
     // the motion worse, so the useful loop is: flip between presets, judge by eye.
-    g_web.on("/sweeptune", []() {
-        struct P { const char *name; float deg; int steps; float px; };
-        // All keep the 55 deg trail, which reads best; they trade the smoothness of the
-        // gradient inside it against frame rate. Band count is what costs time -- each
-        // band is a separate polygon fill -- and frame rate is what the stutter actually
-        // tracks, not the trail's shape.
-        static const P kPresets[] = {
-            { "1 smoothest gradient, 81 ms/frame", 55.0f, 18, 17.6f },
-            { "2 fine gradient, 77 ms/frame",      55.0f, 12, 17.6f },
-            { "3 medium gradient, 72 ms/frame",    55.0f,  8, 17.6f },
-            { "4 coarse gradient, 60 ms/frame",    55.0f,  5, 17.6f },
-            { "5 banded, fastest ~55 ms/frame",    55.0f,  3, 17.6f },
-        };
-        const int n = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
-        char out[160];
-        // Direct control as well as presets, so one variable can be moved at a time.
-        if (g_web.hasArg("deg") || g_web.hasArg("steps") || g_web.hasArg("px")) {
-            float d = 0, px = 0; int st = 0;
-            radar::sweepTuning(&d, &st, &px);
-            if (g_web.hasArg("deg"))   d  = g_web.arg("deg").toFloat();
-            if (g_web.hasArg("steps")) st = g_web.arg("steps").toInt();
-            if (g_web.hasArg("px"))    px = g_web.arg("px").toFloat();
-            radar::setSweepTuning(d, st, px);
-            snprintf(out, sizeof(out), "trail %.0f deg / %d bands, max step %.1f px", d, st, px);
-            g_web.send(200, "text/plain", out);
-            return;
-        }
-        if (g_web.hasArg("p")) {
-            int i = g_web.arg("p").toInt() - 1;
-            if (i >= 0 && i < n) {
-                radar::setSweepTuning(kPresets[i].deg, kPresets[i].steps, kPresets[i].px);
-                snprintf(out, sizeof(out), "preset %s", kPresets[i].name);
-                g_web.send(200, "text/plain", out);
-                return;
-            }
-        }
-        float d = 0, px = 0; int st = 0;
-        radar::sweepTuning(&d, &st, &px);
-        snprintf(out, sizeof(out), "trail %.0f deg / %d bands, max step %.1f px", d, st, px);
-        g_web.send(200, "text/plain", out);
-    });
     g_web.on("/view", handleView);
     g_web.on("/clockfmt", handleClockFmt);
     g_web.on("/typeicons", handleTypeIcons);
@@ -1978,13 +1911,10 @@ void loop() {
         g_cloudImageDirty = false;
         ui_on_data_updated();
     }
-    if (g_firesDirty || g_mapDirty) {
-        g_firesDirty = false;
+    if (g_mapDirty) {
         g_mapDirty = false;
-        radar::update(g_snap, g_settings);   // re-project fires / bind a new basemap image
-        ui_on_data_updated();                // ...and refresh the FIRES tile's counts, which
-                                             // otherwise kept showing "fetching..." under a
-                                             // map that had already drawn
+        radar::update(g_snap, g_settings);   // bind a newly downloaded basemap image
+        ui_on_data_updated();
     }
 
     // periodic: HUD clock + wifi/battery indicators
@@ -2022,7 +1952,7 @@ void loop() {
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
-            snprintf(net, sizeof(net), "Configure at\nskyglass.local\n%s  |  %.5f, %.5f",
+            snprintf(net, sizeof(net), "Configure at\n" BOARD_HOSTNAME ".local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
         else
             snprintf(net, sizeof(net), "WiFi setup:\njoin SkyGlass-Setup");

@@ -57,6 +57,29 @@ bool AdsbClient::poll(std::vector<Aircraft>& out) {
     // Only ever touched from adsb_task, so a plain static is fine.
     static uint32_t s_emptyStreak = 0;
 
+    // Your own receiver wins whenever it is configured and answering: no internet round
+    // trip, sub-second data, and it shows whatever your antenna hears.
+    if (_localHost.length() && _srcMode != 2) {
+        std::vector<Aircraft> localList;
+        const bool ok = fetchFrom(_localHost.c_str(), localList, true);
+        if (ok && !localList.empty()) {
+            s_emptyStreak = 0;
+            _lastWasLocal = true;
+            out.swap(localList);
+            return true;
+        }
+        // Local-only is a deliberate choice, so honour it even when the answer is "nothing".
+        // An empty sky over your own antenna is a real result; quietly topping it up from
+        // the APIs would make the receiver look better than it is.
+        if (_srcMode == 1) {
+            _lastWasLocal = ok;
+            if (ok) { out.swap(localList); return true; }
+            return false;
+        }
+    }
+    _lastWasLocal = false;
+    if (_srcMode == 1) return false;          // local-only with no host configured
+
     std::vector<Aircraft> primaryList;
     bool pOk = fetchFrom(ADSB_PRIMARY_HOST, primaryList);
 
@@ -99,22 +122,32 @@ bool AdsbClient::poll(std::vector<Aircraft>& out) {
     return false;
 }
 
-bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out) {
-    const double nm = ceil((double)_rangeKm * 0.539957);            // km -> nautical miles (rounded up)
-    char url[160];
-    snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, _lat, _lon, nm > 1.0 ? nm : 1.0);
+bool AdsbClient::fetchFrom(const char* host, std::vector<Aircraft>& out, bool local) {
+    char url[192];
+    if (local) {
+        // tar1090/readsb serve the whole picture the receiver hears -- there is no radius
+        // query, so the nearest-N cull during parse does that job instead. Plain HTTP: it
+        // is your own LAN, and TLS to a Pi would buy a handshake every poll for nothing.
+        snprintf(url, sizeof(url), "http://%s%s", host, ADSB_LOCAL_PATH);
+    } else {
+        const double nm = ceil((double)_rangeKm * 0.539957);        // km -> nautical miles (rounded up)
+        snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, _lat, _lon, nm > 1.0 ? nm : 1.0);
+    }
 
     bool hostChanged = (_lastHost == nullptr || strcmp(_lastHost, host) != 0);
     if (hostChanged) {
         _http.end();
-        _client.setInsecure();
+        if (!local) _client.setInsecure();
         _http.setReuse(true);
-        _http.setConnectTimeout(6000);
-        _http.setTimeout(8000);
+        _http.setConnectTimeout(local ? 2500 : 6000);   // a box on the LAN answers fast or not at all
+        _http.setTimeout(local ? 4000 : 8000);
         _lastHost = host;
     }
 
-    if (!_http.begin(_client, url)) { Serial.printf("[adsb] begin failed (%s)\n", host); return false; }
+    if (!_http.begin(local ? (WiFiClient &)_plain : (WiFiClient &)_client, url)) {
+        Serial.printf("[adsb] begin failed (%s)\n", host);
+        return false;
+    }
     _http.addHeader("User-Agent", ADSB_USER_AGENT);
     _http.addHeader("Accept", "application/json");
 

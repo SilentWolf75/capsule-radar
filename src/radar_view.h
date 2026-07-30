@@ -17,7 +17,8 @@ enum RadarTheme {
     THEME_ORB   = 1,   // Orb scope: green gradient, grid, yellow blips
     THEME_AMBER    = 2,   // amber CRT scope (warm monochrome chrome)
     THEME_MILITARY = 3,   // night-vision / military green scope
-    THEME_COUNT    = 4
+    THEME_RED      = 4,   // red CRT: keeps dark adaptation at night
+    THEME_COUNT    = 5
 };
 
 // Flattened, display-ready info for one aircraft (detail card / list view).
@@ -71,8 +72,10 @@ void setSweepEnabled(bool on);                   // show/hide the rotating sweep
 bool sweepEnabled();
 void setAirportsEnabled(bool on);                // show/hide airport markers on the scope
 bool airportsEnabled();
-void setFiresEnabled(bool on);                   // show/hide FIRMS wildfire markers
-bool firesEnabled();
+
+// The active theme's chrome accent, so on-scope controls can match the rings
+// instead of staying green on an amber or red scope.
+uint32_t themeAccent();
 // What the scope plots. Aircraft and vessels are different pictures at different
 // scales, so the scope shows one or the other rather than overlaying both.
 enum TrafficMode { TRAFFIC_AIR = 0, TRAFFIC_MARINE = 1 };

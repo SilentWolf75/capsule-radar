@@ -8,7 +8,6 @@
 #include "geo.h"
 #include "coastline.h"
 #include "airports.h"
-#include "wildfire.h"
 #include "map_bg.h"
 #include "vessel.h"
 #include "aircraft_types.h"
@@ -129,7 +128,7 @@ static lv_obj_t  *s_rangeLbl  = nullptr;
 static bool       s_rangeLblVisible = true;
 static bool       s_sweepEnabled    = true;
 static bool       s_airportsEnabled = true;
-static bool       s_firesEnabled    = true;
+static uint32_t   s_accentHex       = 0x1DFF86;   // chrome accent of the active theme
 static int        s_trafficMode     = radar::TRAFFIC_AIR;
 static int        s_mapOpacity      = 85;
 static bool       s_typeIcons       = true;   // per-type silhouettes vs the plain dart
@@ -298,6 +297,16 @@ static void show(lv_obj_t *o, bool v) {
 }
 
 static lv_color_t alt_color(float altFt, bool onGround) {
+    // Military is night-vision: one phosphor green for every contact, the way an image
+    // intensifier actually renders. Altitude survives as brightness rather than hue, so
+    // the scope still reads high-versus-low without a five-colour key -- and the
+    // emergency ring, being the only non-green thing on screen, becomes unmissable.
+    if (s_theme == THEME_MILITARY) {
+        if (onGround)      return lv_color_hex(0x2E7D46);
+        if (altFt < 10000) return lv_color_hex(0x9BF0B2);
+        if (altFt < 25000) return lv_color_hex(0x6FD98C);
+        return lv_color_hex(0x4CBE6B);
+    }
     if (onGround)      return lv_color_hex(0x888888);
     if (altFt < 3000)  return lv_color_hex(0xFF5A3C);
     if (altFt < 10000) return lv_color_hex(0xFFB23C);
@@ -375,8 +384,7 @@ static void grid_draw_cb(lv_event_t *e) {
         td.border_opa = 160;
         coastline_draw(d, COAST_COLOR, 170, 2);    // landmass outline under the triangle
         if (s_airportsEnabled) airports_draw(d, AIRPORT_COLOR, 175, AIRPORT_LABEL_COLOR, AIRPORT_LABEL_OPA);
-        if (s_firesEnabled) wildfire_draw(d, 220);
-        lv_draw_polygon(d, &td, tri, 3);
+            lv_draw_polygon(d, &td, tri, 3);
         return;
     }
 
@@ -384,7 +392,6 @@ static void grid_draw_cb(lv_event_t *e) {
     // Steel blue + 2 px so it reads as a map outline, distinct from the green altitude trails.
     coastline_draw(d, COAST_COLOR, 165, 2);
     if (s_airportsEnabled) airports_draw(d, AIRPORT_COLOR, 175, AIRPORT_LABEL_COLOR, AIRPORT_LABEL_OPA);
-    if (s_firesEnabled) wildfire_draw(d, 220);
 
     // phosphor: concentric rings + crosshair
     lv_draw_arc_dsc_t ad;
@@ -904,12 +911,22 @@ void setTheme(int t) {
 
     switch (s_theme) {                          // pick the scope chrome palette
         case THEME_AMBER:
+            s_accentHex = 0xFFB23C;
             s_cRing = lv_color_hex(0xFFB23C); s_cLead = lv_color_hex(0xFFD27A);
             s_cInk  = lv_color_hex(0xFFE9C2); s_cSoft = lv_color_hex(0xFFC98A); break;
+        case THEME_RED:
+            s_accentHex = 0xE0323C;
+            // Deep red chrome. Red preserves night vision, which is the point, but it
+            // also collides with the low-altitude end of the aircraft palette -- so the
+            // chrome sits darker than the amber theme's to keep traffic reading on top.
+            s_cRing = lv_color_hex(0xE0323C); s_cLead = lv_color_hex(0xFF6B6B);
+            s_cInk  = lv_color_hex(0xFFE0E0); s_cSoft = lv_color_hex(0xFF9B9B); break;
         case THEME_MILITARY:
+            s_accentHex = 0x49C46B;
             s_cRing = lv_color_hex(0x49C46B); s_cLead = lv_color_hex(0x76E08C);
             s_cInk  = lv_color_hex(0xE0FFE6); s_cSoft = lv_color_hex(0x9FD7A8); break;
         default:                                // phosphor (orb uses its own colors)
+            s_accentHex = 0x1DFF86;
             s_cRing = COL_GREEN; s_cLead = COL_LEAD; s_cInk = COL_INK; s_cSoft = COL_SOFT; break;
     }
 
@@ -960,11 +977,7 @@ void setAirportsEnabled(bool on) {
 }
 bool airportsEnabled() { return s_airportsEnabled; }
 
-void setFiresEnabled(bool on) {
-    s_firesEnabled = on;
-    if (s_gridLayer) lv_obj_invalidate(s_gridLayer);
-}
-bool firesEnabled() { return s_firesEnabled; }
+uint32_t themeAccent() { return s_accentHex; }
 
 void setTrafficMode(int mode) {
     s_trafficMode = (mode == TRAFFIC_MARINE) ? TRAFFIC_MARINE : TRAFFIC_AIR;
@@ -1151,10 +1164,6 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         }
     }
 
-    // Fires re-project on their own schedule (new FIRMS data arrives between zooms),
-    // so this is checked every poll rather than only on a geometry change.
-    if (wildfire_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R) && s_gridLayer)
-        lv_obj_invalidate(s_gridLayer);
     // Only project vessels when they're the picture being shown. In aircraft mode they
     // are never drawn, so re-projecting every AIS contact each poll is pure waste.
     if (s_trafficMode == radar::TRAFFIC_MARINE)

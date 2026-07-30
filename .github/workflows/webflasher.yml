@@ -49,10 +49,9 @@ jobs:
         run: pio run -e esp32-s3-amoled-175
 
       # The P4 target shares ui.cpp, radar_view.cpp, main.cpp and every data client with
-      # the S3 build. Building it here means a change that quietly breaks portability
-      # fails in CI rather than on the bench. It is not published -- the S3 firmware is
-      # what the flasher serves -- so a failure here blocks a genuine regression only.
-      - name: Build the ESP32-P4 target (portability check)
+      # the S3 build, so building it here catches a change that quietly breaks
+      # portability in CI rather than on the bench.
+      - name: Build the ESP32-P4 target
         run: pio run -e esp32-p4-lcd-4c
 
       - name: Stage the flashable images
@@ -84,6 +83,15 @@ jobs:
             0x8000  "$B/partitions.bin" \
             0xe000  "$BOOT_APP0" \
             0x10000 "$B/firmware.bin"
+
+          # The P4 board is published as a plain application image, not through the
+          # browser flasher: ESP Web Tools drives esptool-js, and P4 support there is not
+          # something this project has verified. This file is what the device's own OTA
+          # page accepts, and what `esptool write_flash 0x10000` wants.
+          P=.pio/build/esp32-p4-lcd-4c
+          cp "$P/firmware.bin"    site/SkyGlass-esp32p4-firmware.bin
+          cp "$P/bootloader.bin"  site/SkyGlass-esp32p4-bootloader.bin
+          cp "$P/partitions.bin"  site/SkyGlass-esp32p4-partitions.bin
 
       - uses: actions/upload-pages-artifact@v3
         with:
