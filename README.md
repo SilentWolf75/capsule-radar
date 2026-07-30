@@ -2,15 +2,14 @@
 
 <p align="center">
   <a href="https://silentwolf75.github.io/skyglass/"><img src="https://img.shields.io/badge/Flash%20in%20browser-FF6D00?logo=googlechrome&logoColor=white" alt="Flash in browser"></a>
-  <img src="https://img.shields.io/badge/boards-ESP32--S3%20%C2%B7%20ESP32--P4-E7352C?logo=espressif&logoColor=white" alt="Boards: ESP32-S3 and ESP32-P4">
+  <img src="https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white" alt="Board: ESP32-S3 round AMOLED">
   <a href="https://github.com/SilentWolf75/skyglass/releases"><img src="https://img.shields.io/github/v/tag/SilentWolf75/skyglass?label=firmware&color=7B42BC" alt="Firmware version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/code-MIT-2088FF" alt="License: MIT"></a>
   <a href="https://github.com/SilentWolf75/skyglass/stargazers"><img src="https://img.shields.io/github/stars/SilentWolf75/skyglass?style=social" alt="GitHub stars"></a>
 </p>
 
-A live **ADS-B aircraft radar** for round touch displays — the **Waveshare
-ESP32-S3-Touch-AMOLED-1.75** (466×466 AMOLED) and the **ESP32-P4-WIFI6-Touch-LCD-4C**
-(720×720 IPS). It pulls nearby aircraft from a free online feed over
+A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75** — a round
+466×466 AMOLED with capacitive touch. It pulls nearby aircraft from a free online feed over
 WiFi and plots them on a touch radar scope centred on your location: real callsigns, real
 altitudes, aircraft drawn as the type they actually are, with photos and route lookups on tap.
 
@@ -125,38 +124,16 @@ Long-press the screen to cycle, or pick one on the config page — **Phosphor**,
 
 ## Hardware
 
-Two boards, one firmware. Pick the environment that matches yours; everything above works
-on both.
-
-**[ESP32-S3-Touch-AMOLED-1.75](https://www.amazon.com/dp/B0F886SYQ6)** (ASIN `B0F886SYQ6`)
-— the original target. ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300** AMOLED 466×466 over
-QSPI, **CST9217** touch, **QMI8658** IMU, **PCF85063** RTC, **AXP2101** PMIC, **ES8311**
-audio + speaker, microSD. The IMU gives it face-down sleep and shake-to-refresh; the PMIC
-gives it a battery readout.
-
-**[ESP32-P4-WIFI6-Touch-LCD-4C](https://www.amazon.com/dp/B0FB9CQVRR)** (ASIN `B0FB9CQVRR`)
-— bigger and sharper. ESP32-P4 RISC-V (32 MB PSRAM, 32 MB flash), 4" IPS **720×720** over
-**MIPI-DSI**, **GT9271** touch, **ES8311** audio, microSD. The P4 has no radio of its own:
-Wi-Fi 6 comes from an onboard ESP32-C6 over SDIO, which the firmware uses through the normal
-`WiFi` API. No IMU, RTC or PMIC on this board, so those features degrade honestly rather than
-reporting made-up values. The scope is drawn at 720×720 and runs about 12 fps — smooth, but
-not faster than the smaller board; see [`docs/PORT_P4.md`](docs/PORT_P4.md) for why.
-
-Per-board pins and geometry live in [`src/boards/`](src/boards), taken from the vendor
-definitions rather than guessed; [`src/config.h`](src/config.h) keeps the app-level settings.
-
-Each board answers to its own name on the network — `skyglass-s3.local` and
-`skyglass-p4.local` — so you can run both at once without them fighting over one address.
+Waveshare **[ESP32-S3-Touch-AMOLED-1.75](https://www.amazon.com/dp/B0F886SYQ6)**
+(ASIN `B0F886SYQ6`): ESP32-S3R8 (8 MB PSRAM, 16 MB flash), **CO5300**
+AMOLED over QSPI, **CST9217** touch, **QMI8658** IMU, **PCF85063** RTC, **AXP2101** PMIC,
+**ES8311** audio + speaker, microSD. All pins live in [`src/config.h`](src/config.h), taken from
+the board definition rather than guessed.
 
 ## Flash from your browser (no toolchain)
 
 1. Open the **[web flasher](https://silentwolf75.github.io/skyglass/)** in Chrome or Edge.
 2. Plug the board in with a USB-C **data** cable and click **Install**.
-
-> The browser flasher serves the **ESP32-S3** build. For the P4 board, download
-> `SkyGlass-esp32p4-firmware.bin` from the same page and either upload it on the device's
-> own **Firmware update** page, or write it with
-> `esptool --chip esp32p4 write_flash 0x10000 SkyGlass-esp32p4-firmware.bin`.
 
 > Leave **Erase device** unticked to keep your WiFi credentials, settings and uploaded alert
 > sound. Tick it for a clean install or to recover a confused device.
@@ -169,8 +146,7 @@ flash regardless of the erase checkbox.
 ## Build & flash (PlatformIO)
 
 ```bash
-pio run -e esp32-s3-amoled-175 -t upload     # 1.75" AMOLED board
-pio run -e esp32-p4-lcd-4c     -t upload     # 4" P4 board
+pio run -e esp32-s3-amoled-175 -t upload
 ```
 
 Serial log:

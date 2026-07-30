@@ -50,10 +50,9 @@ bool cloud_image_fetch(double lat, double lon) {
     snprintf(url, sizeof(url),
         "https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.1.1&request=GetMap"
         "&layers=mtg_fd%%3Argb_cloudtype%%2Cbackgrounds%%3Ane_10m_coastline%%2Cbackgrounds%%3Ane_boundary_lines_land"
-        "&srs=EPSG%%3A4326&bbox=%.5f%%2C%.5f%%2C%.5f%%2C%.5f&width=%d&height=%d"
+        "&srs=EPSG%%3A4326&bbox=%.5f%%2C%.5f%%2C%.5f%%2C%.5f&width=360&height=360"
         "&styles=&format=image%%2Fjpeg&bgcolor=0x000000",
-        lon - lonSpan, lat - latSpan, lon + lonSpan, lat + latSpan,
-        WX_RADAR_SIZE, WX_RADAR_SIZE);
+        lon - lonSpan, lat - latSpan, lon + lonSpan, lat + latSpan);
 
     uint8_t *image = nullptr; size_t imageLen = 0;
     if (!get_jpeg(url, &image, &imageLen)) {

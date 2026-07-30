@@ -35,11 +35,6 @@
 #define SCREEN_CX           360
 #define SCREEN_CY           360
 #define RADAR_R_OUTER_PX    337
-// The weather image is a centre crop of a 512 px tile. At the S3's 360 it covered half of
-// this panel and left a black moat. The full tile fills the face and still leaves a
-// 104 px band top and bottom for the header and the source line, so nothing sits on
-// the scope itself.
-#define WX_RADAR_SIZE       512
 #define LCD_COL_OFFSET      0
 #define LCD_ROW_OFFSET      0
 

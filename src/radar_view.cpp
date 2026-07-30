@@ -12,7 +12,6 @@
 #include "map_bg.h"
 #include "vessel.h"
 #include "aircraft_types.h"
-#include "p4_theme.h"
 #include <lvgl.h>
 #include <math.h>
 #include <stdio.h>
@@ -118,7 +117,6 @@ static void      (*s_themeCb)(int) = nullptr;
 static lv_color_t s_cRing = COL_GREEN, s_cLead = COL_LEAD, s_cInk = COL_INK, s_cSoft = COL_SOFT;
 static lv_obj_t  *s_parent   = nullptr;
 static lv_obj_t  *s_mapCanvas = nullptr;   // basemap image, below every other layer
-static float      s_coRange   = 30.0f;
 static lv_obj_t  *s_gridLayer = nullptr;
 static lv_obj_t  *s_sweep     = nullptr;
 static lv_obj_t  *s_acLayer   = nullptr;
@@ -300,16 +298,12 @@ static void show(lv_obj_t *o, bool v) {
 }
 
 static lv_color_t alt_color(float altFt, bool onGround) {
-#if defined(BOARD_WAVESHARE_P4_LCD_4C)
-    return p4_alt_color(altFt, onGround);
-#else
     if (onGround)      return lv_color_hex(0x888888);
     if (altFt < 3000)  return lv_color_hex(0xFF5A3C);
     if (altFt < 10000) return lv_color_hex(0xFFB23C);
     if (altFt < 20000) return lv_color_hex(0xC8FF3C);
     if (altFt < 30000) return lv_color_hex(0x39FF14);
     return lv_color_hex(0x3CE0FF);
-#endif
 }
 
 static inline lv_point_t rim_point(float bearingDeg, float r) {
@@ -410,11 +404,6 @@ static void grid_draw_cb(lv_event_t *e) {
     lv_point_t v1 = { s_cx, (lv_coord_t)(s_cy - 211) }, v2 = { s_cx, (lv_coord_t)(s_cy + 211) };
     lv_draw_line(d, &ll, &h1, &h2);
     lv_draw_line(d, &ll, &v1, &v2);
-
-#if defined(BOARD_WAVESHARE_P4_LCD_4C)
-    p4_draw_neon_bezel(d, P4_SCREEN_RADAR);
-    p4_draw_radar_scope_chrome(d, s_coRange);
-#endif
 }
 
 // =============================== sweep =======================================
@@ -866,35 +855,14 @@ static void ac_draw_cb(lv_event_t *e) {
             lc.color = s_cInk;
             lv_area_t a1 = { (lv_coord_t)(ac.pos.x + 12 * gk), (lv_coord_t)(ac.pos.y - 14 * gk),
                              (lv_coord_t)(ac.pos.x + 168 * gk), (lv_coord_t)(ac.pos.y + 4 * gk) };
-            // The callsign is the one thing that must stay readable, and it competes with
-            // the map, the coastlines and the airport idents underneath it. A tight
-            // translucent plate behind the text wins that fight without hiding the map.
-            lv_draw_rect_dsc_t plate;
-            lv_draw_rect_dsc_init(&plate);
-            plate.bg_color = lv_color_black();
-            plate.bg_opa   = 150;
-            plate.radius   = 3;
-            auto text_plate = [&](const lv_area_t &box, const lv_font_t *font, const char *txt) {
-                lv_point_t sz;
-                lv_txt_get_size(&sz, txt, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-                lv_area_t pa = { (lv_coord_t)(box.x1 - 3), (lv_coord_t)(box.y1 - 1),
-                                 (lv_coord_t)(box.x1 + sz.x + 3), (lv_coord_t)(box.y1 + sz.y + 1) };
-                lv_draw_rect(d, &plate, &pa);
-            };
-            if (ac.call[0]) {
-                text_plate(a1, lc.font, ac.call);
-                lv_draw_label(d, &lc, &a1, ac.call, NULL);
-            }
+            if (ac.call[0]) lv_draw_label(d, &lc, &a1, ac.call, NULL);
             lv_draw_label_dsc_t la;
             lv_draw_label_dsc_init(&la);
             la.font = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
             la.color = ac.color;
             lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 4 * gk),
                              a1.x2, (lv_coord_t)(ac.pos.y + 26 * gk) };
-            if (ac.altTxt[0]) {
-                text_plate(a2, la.font, ac.altTxt);
-                lv_draw_label(d, &la, &a2, ac.altTxt, NULL);
-            }
+            if (ac.altTxt[0]) lv_draw_label(d, &la, &a2, ac.altTxt, NULL);
         }
     }
 }
@@ -1137,11 +1105,9 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
 
     // Reproject the coastline only when the scope geometry actually changes (home
     // moved or range zoomed) — never per frame. Then repaint the static chrome layer.
-    static double s_coLat = 1e9, s_coLon = 1e9;
-    static bool s_coFirst = true;
+    static double s_coLat = 1e9, s_coLon = 1e9; static float s_coRange = -1.0f;
     if (s.homeLat != s_coLat || s.homeLon != s_coLon || s.rangeKm != s_coRange) {
-        const bool firstFix = s_coFirst;
-        s_coFirst = false;
+        const bool firstFix = (s_coRange < 0.0f);
         s_coLat = s.homeLat; s_coLon = s.homeLon; s_coRange = s.rangeKm;
         coastline_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R);
         airports_project(s.homeLat, s.homeLon, s.rangeKm, s_cx, s_cy, R);

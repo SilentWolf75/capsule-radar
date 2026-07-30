@@ -1,6 +1,5 @@
 #include "airports.h"
 #include "airports_data.h"
-#include "config.h"
 #include "geo.h"
 #include <vector>
 #include <math.h>
@@ -51,39 +50,28 @@ void airports_draw(lv_draw_ctx_t *ctx, lv_color_t color, lv_opa_t opa,
 
     lv_draw_arc_dsc_t ring;
     lv_draw_arc_dsc_init(&ring);
-    ring.color = color; ring.width = (SCREEN_W >= 600) ? 3 : 2; ring.opa = opa;
+    ring.color = color; ring.width = 2; ring.opa = opa;
 
     lv_draw_rect_dsc_t dot;
     lv_draw_rect_dsc_init(&dot);
     dot.bg_color = color; dot.bg_opa = opa; dot.radius = LV_RADIUS_CIRCLE;
 
-    // Markers and idents scale with the panel like the rest of the chrome; a 3 px ring
-    // and 14 px text are a 466 px design and vanish on a 720 px screen.
-    const bool big   = (SCREEN_W >= 600);
-    const int  rRing = big ? 5 : 3;
-    const int  rDot  = big ? 3 : 2;
-
     lv_draw_label_dsc_t lbl;
     lv_draw_label_dsc_init(&lbl);
-    lbl.color = labelColor; lbl.opa = labelOpa;
-    lbl.font = big ? &lv_font_montserrat_16 : &lv_font_montserrat_14;
+    lbl.color = labelColor; lbl.opa = labelOpa; lbl.font = &lv_font_montserrat_14;
 
     const bool labelAll = (s_apts.size() <= APT_LABEL_ALL_MAX);
     for (const Apt &ap : s_apts) {
         if (ap.large) {
-            lv_draw_arc(ctx, &ring, &ap.pos, rRing, 0, 360);                // small hollow ring
+            lv_draw_arc(ctx, &ring, &ap.pos, 3, 0, 360);                    // small hollow ring
         } else {
-            lv_area_t d = { (lv_coord_t)(ap.pos.x - rDot), (lv_coord_t)(ap.pos.y - rDot),
-                            (lv_coord_t)(ap.pos.x + rDot), (lv_coord_t)(ap.pos.y + rDot) };
+            lv_area_t d = { (lv_coord_t)(ap.pos.x - 2), (lv_coord_t)(ap.pos.y - 2),
+                            (lv_coord_t)(ap.pos.x + 2), (lv_coord_t)(ap.pos.y + 2) };
             lv_draw_rect(ctx, &dot, &d);                                    // small marker
         }
         if (ap.iata[0] && (ap.large || labelAll)) {
-            // Hung below the marker rather than beside it: aircraft callsigns sit to the
-            // right of their glyph, and the two label runs kept landing on each other.
-            const int dy = rRing + 2;
-            lv_area_t la = { (lv_coord_t)(ap.pos.x - UI_S(26)), (lv_coord_t)(ap.pos.y + dy),
-                             (lv_coord_t)(ap.pos.x + UI_S(26)), (lv_coord_t)(ap.pos.y + dy + UI_S(18)) };
-            lbl.align = LV_TEXT_ALIGN_CENTER;
+            lv_area_t la = { (lv_coord_t)(ap.pos.x + 5), (lv_coord_t)(ap.pos.y - 7),
+                             (lv_coord_t)(ap.pos.x + 52), (lv_coord_t)(ap.pos.y + 7) };
             lv_draw_label(ctx, &lbl, &la, ap.iata, NULL);
         }
     }
