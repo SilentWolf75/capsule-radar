@@ -58,6 +58,10 @@ static const float RANGE_STEPS_KM[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 
 #define ADSB_LOCAL_PATH     "/tar1090/data/aircraft.json"
 #define ADSB_USER_AGENT     "SkyGlass/1.0 (ESP32-S3 hobby; +https://github.com/SilentWolf75/skyglass)"
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
+// Rows the contact list will build. Bounded because each row is LVGL pool memory and
+// the pool is fixed; the list is nearest-first so the cap keeps the contacts that matter.
+#define UI_LIST_MAX_ROWS    24
+
 #define ADSB_MAX_AIRCRAFT   120             // hard cap parsed per poll (protect RAM in busy areas)
 // When the primary feed answers cleanly but with zero aircraft, re-probe the fallback
 // only every Nth poll. An empty sky is normal and can last hours; see AdsbClient::poll.

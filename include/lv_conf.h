@@ -28,7 +28,14 @@
 /* Object/style pool (internal RAM). Big bitmap draw buffers are allocated
    separately in PSRAM in display.cpp. Bump this if the radar UI grows. */
 #define LV_MEM_CUSTOM 0
+/* LVGL allocates every widget, style and mask from this fixed pool, and running out is
+ * not graceful -- the allocator asserts and spins, freezing whatever core LVGL runs on.
+ * The 720x720 panel carries the same widget tree at larger sizes, so it gets more room. */
+#if defined(BOARD_WAVESHARE_P4_LCD_4C)
+#define LV_MEM_SIZE (112U * 1024U)
+#else
 #define LV_MEM_SIZE (64U * 1024U)
+#endif
 #define LV_MEM_ADR 0
 #define LV_MEM_BUF_MAX_NUM 16
 #define LV_MEMCPY_MEMSET_STD 0

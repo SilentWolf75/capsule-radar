@@ -664,7 +664,13 @@ static void build_list(void) {
         return;
     }
 
-    const int n = radar::count();
+    // Cap the rows. Every row costs LVGL pool memory, and with a local receiver feeding
+    // everything it hears -- rather than a radius-limited API query -- this list went from
+    // a handful of contacts to dozens. Exhausting the pool is not a graceful failure in
+    // LVGL: the allocator asserts and spins, taking the display and the web server with
+    // it. The list is nearest-first, so a cap keeps the useful end.
+    const int total = radar::count();
+    const int n = total < UI_LIST_MAX_ROWS ? total : UI_LIST_MAX_ROWS;
     for (int i = 0; i < n; ++i) {
         AcInfo in;
         radar::info(i, in);
@@ -678,6 +684,15 @@ static void build_list(void) {
         lv_obj_set_style_text_font(b, F16(), 0);
         lv_obj_set_user_data(b, (void *)(intptr_t)i);
         lv_obj_add_event_cb(b, list_btn_cb, LV_EVENT_CLICKED, NULL);
+    }
+    if (total > n) {
+        // Say so rather than silently truncating -- the count is the interesting part.
+        char more[40];
+        snprintf(more, sizeof(more), "+%d more, nearest shown", total - n);
+        lv_obj_t *m = lv_label_create(s_list);
+        lv_obj_set_style_text_font(m, F12(), 0);
+        lv_obj_set_style_text_color(m, UI_DIM, 0);
+        lv_label_set_text(m, more);
     }
 }
 
