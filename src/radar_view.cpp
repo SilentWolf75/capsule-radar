@@ -26,12 +26,8 @@
 #include <esp_heap_caps.h>
 #endif
 #if !defined(ARDUINO)
-            if (ac.call[0]) {
-                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d\n",
-                       ac.call, (int)ac.pos.x, (int)ac.pos.y, (int)wmax, chosen,
-                       (int)px, (int)pdy, (int)s_keepOut.x1, (int)s_keepOut.y1,
-                       (int)s_keepOut.x2, (int)s_keepOut.y2);
-            }
+#include "native_compat.h"       // millis / micros for the simulator
+#include <stdio.h>              // TEMP placement trace
 #endif
 
 #ifndef M_PI
@@ -925,14 +921,12 @@ static void ac_draw_cb(lv_event_t *e) {
                     px = cands[ci].x0; pdy = cands[ci].dy; chosen = ci; break;
                 }
             }
-#if !defined(ARDUINO)
-            if (ac.call[0]) {
-                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d
-",
+#if !defined(ARDUINO)   /* TEMP placement trace */
+            if (ac.call[0])
+                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d\n",
                        ac.call, (int)ac.pos.x, (int)ac.pos.y, (int)wmax, chosen,
                        (int)px, (int)pdy, (int)s_keepOut.x1, (int)s_keepOut.y1,
                        (int)s_keepOut.x2, (int)s_keepOut.y2);
-            }
 #endif
 
             lv_draw_label_dsc_t lc;
