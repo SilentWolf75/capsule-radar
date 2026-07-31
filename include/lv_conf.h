@@ -33,6 +33,12 @@
  * The 720x720 panel carries the same widget tree at larger sizes, so it gets more room. */
 #if defined(BOARD_WAVESHARE_P4_LCD_4C)
 #define LV_MEM_SIZE (112U * 1024U)
+#elif !defined(ARDUINO)
+/* Desktop simulator. The device budgets do not transfer: the host is 64-bit, so every
+ * pointer inside lv_obj_t, the style lists and the timer/event chains doubles, and the
+ * same widget tree overruns 64 KB before the first frame. Colour depth and draw buffers
+ * are identical to the S3, so nothing pixel-visible changes -- only the object pool. */
+#define LV_MEM_SIZE (1024U * 1024U)
 #else
 #define LV_MEM_SIZE (64U * 1024U)
 #endif
