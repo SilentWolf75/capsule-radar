@@ -1,0 +1,59 @@
+name: UI screenshots
+
+# Renders every screen in the SDL simulator -- the same ui.cpp and radar_view.cpp the
+# boards run -- and diffs them against committed references. Layout regressions are what
+# this project actually suffers from (text landing on text, rings drifting off their
+# image, labels clipped by the round bezel), and every one of them so far was found by
+# flashing a board and looking at it. This catches them before hardware.
+#
+# The simulator runs headless: SDL's dummy video driver plus a software renderer, so no
+# display or GPU is needed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  screens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO + SDL2
+        run: |
+          pip install platformio
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Build the simulator
+        run: pio run -e native
+
+      - name: Render every screen
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          mkdir -p shots
+          BIN="$(find .pio/build/native -maxdepth 1 -type f -name 'program*' | head -1)"
+          echo "simulator binary: $BIN"
+          "$BIN" --shot shots/sim
+          ls -l shots
+
+      - name: Compare against references
+        run: python tools/check_screens.py --shots shots
+
+      # Always published: on a first run these are the references to commit, and on a
+      # failure they are the actual images to look at next to the diff percentages.
+      - name: Upload rendered screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: |
+            shots/
+            tests/screens/

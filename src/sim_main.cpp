@@ -139,6 +139,14 @@ int main(int argc, char **argv) {
                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                              SIM_W, SIM_H, SDL_WINDOW_ALLOW_HIGHDPI);
     s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (s_win && !s_ren) {
+        // CI runs this headless (SDL_VIDEODRIVER=dummy), where there is no accelerated
+        // renderer and no vsync to wait for. Software is fine: the screenshots are read
+        // back from the renderer, not shown to anyone.
+        printf("[sim] no accelerated renderer (%s); falling back to software
+", SDL_GetError());
+        s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_SOFTWARE);
+    }
     if (!s_win || !s_ren) {
         printf("[sim] window/renderer creation failed: %s\n", SDL_GetError());
         return 1;
@@ -312,27 +320,42 @@ int main(int argc, char **argv) {
                 mock_step(1.0);
                 radar::update(g_mockAcs, g_set);
             }
+            // Determinism: these images are compared pixel-for-pixel against committed
+            // references, so anything time-dependent has to stop. The sweep is the only
+            // animation on the scope; parking it costs the ability to catch sweep
+            // regressions and buys a stable diff for everything else.
+            radar::setSweepEnabled(false);
             radar::select(0);                            // select an aircraft so the card shows
             ui_on_data_updated();
             { char wc[12]; if (route_pending(wc, sizeof(wc))) route_store(wc, "Madrid", "London"); }
             ui_on_data_updated();                        // pick up the mock route for the card
             int ow, oh;
             SDL_GetRendererOutputSize(s_ren, &ow, &oh);
+            // Every view and every theme. Kept in step with the app: views run 0..6 since
+            // the fires screen was removed, and Red CRT joined the themes.
             struct Shot { const char *name; int view; int theme; bool forecast; };
-            const Shot shots[8] = {
-                { "radar",  0, THEME_PHOSPHOR, false },
-                { "orb", 0, THEME_ORB, false },
-                { "amber",  0, THEME_AMBER, false },
-                { "military",0, THEME_MILITARY, false },
-                { "list",   1, THEME_PHOSPHOR, false },
-                { "stats",  2, THEME_PHOSPHOR, false },
-                { "weather",3, THEME_PHOSPHOR, false },
-                { "forecast",3, THEME_PHOSPHOR, true },
+            const Shot shots[] = {
+                { "radar",    0, THEME_PHOSPHOR, false },
+                { "orb",      0, THEME_ORB,      false },
+                { "amber",    0, THEME_AMBER,    false },
+                { "military", 0, THEME_MILITARY, false },
+                { "red",      0, THEME_RED,      false },
+                { "list",     1, THEME_PHOSPHOR, false },
+                { "stats",    2, THEME_PHOSPHOR, false },
+                { "weather",  3, THEME_PHOSPHOR, false },
+                { "forecast", 3, THEME_PHOSPHOR, true  },
+                { "tracked",  4, THEME_PHOSPHOR, false },
+                { "clock",    5, THEME_PHOSPHOR, false },
+                { "about",    6, THEME_PHOSPHOR, false },
             };
-            for (int v = 0; v < 8; ++v) {
+            const int shotCount = (int)(sizeof(shots) / sizeof(shots[0]));
+            for (int v = 0; v < shotCount; ++v) {
                 radar::setTheme(shots[v].theme);
                 ui_set_weather_forecast(shots[v].forecast);
                 ui_show_view(shots[v].view);
+                // Tiles rebuild their contents on the view-changed event, and some of that
+                // work is deferred to a timer, so pump before forcing the redraw.
+                for (int k = 0; k < 4; ++k) { lv_timer_handler(); }
                 lv_refr_now(NULL);                       // force the view into the buffer
                 SDL_RenderClear(s_ren);
                 SDL_RenderCopy(s_ren, s_tex, NULL, NULL);
