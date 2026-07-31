@@ -194,6 +194,7 @@ struct AcDraw {
     int        squawk;
     lv_coord_t lblW = 0;       // measured label width; text changes rarely, so measure rarely
     lv_coord_t lblDx = 0, lblDy = 0;   // chosen offset from the glyph (see layout_labels)
+    bool       lblSet = false;         // has a placement been chosen yet?
     std::vector<lv_point_t> trail;
 };
 static std::vector<AcDraw> s_acs;
@@ -627,42 +628,57 @@ static void layout_labels(void) {
             { midX, (lv_coord_t)(blocker.y2 + pad - yTop) },
         };
 
-        lv_coord_t bestX = cands[0].x0, bestDy = 0;
-        int32_t best = UNPLACEABLE + 1;
-        for (const Cand &c : cands) {
-            const lv_coord_t x0 = c.x0, x1 = (lv_coord_t)(x0 + wmax);
-            const lv_coord_t y0 = (lv_coord_t)(yTop + c.dy), y1 = (lv_coord_t)(yBot + c.dy);
-            int32_t score = 0;
+        auto costOf = [&](lv_coord_t x0, lv_coord_t dy) -> int32_t {
+            const lv_coord_t x1 = (lv_coord_t)(x0 + wmax);
+            const lv_coord_t y0 = (lv_coord_t)(yTop + dy), y1 = (lv_coord_t)(yBot + dy);
             // glyph_bbox() is the draw cull, so a label outside it is dropped, not moved.
             if (x0 < ac.pos.x - LBL_MAX_DX || x1 > ac.pos.x + 180 ||
-                c.dy < -LBL_MAX_DY || c.dy > LBL_MAX_DY) score = UNPLACEABLE;
-            if (score == 0) {
-                const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
-                for (int i = 0; i < 2 && score == 0; ++i) for (int j = 0; j < 2; ++j) {
-                    const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
-                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) { score = UNPLACEABLE; break; }
-                }
+                dy < -LBL_MAX_DY || dy > LBL_MAX_DY) return UNPLACEABLE;
+            const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
+            for (int i = 0; i < 2; ++i) for (int j = 0; j < 2; ++j) {
+                const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
+                if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return UNPLACEABLE;
             }
-            if (score == 0) {
-                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
-                    const lv_area_t &k = s_keepOut[i];
-                    if (!keepout_live(k)) continue;
-                    const int32_t ow = LV_MIN(x1, k.x2) - LV_MAX(x0, k.x1);
-                    const int32_t oh = LV_MIN(y1, k.y2) - LV_MAX(y0, k.y1);
-                    if (ow > 0 && oh > 0) score += ow * oh;
-                }
-                for (int i = 0; i < nPlaced; ++i) {
-                    const int32_t ow = LV_MIN(x1, placed[i].x2) - LV_MAX(x0, placed[i].x1);
-                    const int32_t oh = LV_MIN(y1, placed[i].y2) - LV_MAX(y0, placed[i].y1);
-                    if (ow > 0 && oh > 0) score += ow * oh;
-                }
+            int32_t cover = 0;
+            for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
+                const lv_area_t &k = s_keepOut[i];
+                if (!keepout_live(k)) continue;
+                const int32_t ow = LV_MIN(x1, k.x2) - LV_MAX(x0, k.x1);
+                const int32_t oh = LV_MIN(y1, k.y2) - LV_MAX(y0, k.y1);
+                if (ow > 0 && oh > 0) cover += ow * oh;
             }
-            if (score < best) { best = score; bestX = x0; bestDy = c.dy; }
-            if (best == 0) break;                  // clean; earlier candidates win ties
+            for (int i = 0; i < nPlaced; ++i) {
+                const int32_t ow = LV_MIN(x1, placed[i].x2) - LV_MAX(x0, placed[i].x1);
+                const int32_t oh = LV_MIN(y1, placed[i].y2) - LV_MAX(y0, placed[i].y1);
+                if (ow > 0 && oh > 0) cover += ow * oh;
+            }
+            return cover;
+        };
+
+        // Stay put unless staying put is actually bad. This runs on every motion step, so
+        // re-deciding from scratch let a one-pixel drift flip a label to another candidate
+        // and back again -- on screen the callsigns visibly danced around even where
+        // nothing overlapped. A clean placement is never disturbed, and a dirty one only
+        // moves for a clearly better option, so a marginal score cannot start an
+        // oscillation.
+        const int32_t curCost = ac.lblSet ? costOf((lv_coord_t)(ac.pos.x + ac.lblDx), ac.lblDy)
+                                          : UNPLACEABLE + 1;
+        lv_coord_t bestX = (lv_coord_t)(ac.pos.x + ac.lblDx), bestDy = ac.lblDy;
+        int32_t best = curCost;
+        if (curCost != 0) {
+            const int32_t margin = (int32_t)(wmax * 4);   // ~4 text rows' worth of cover
+            for (const Cand &c : cands) {
+                const int32_t score = costOf(c.x0, c.dy);
+                const int32_t bar = ac.lblSet ? (best - margin) : best;
+                if (score < bar) { best = score; bestX = c.x0; bestDy = c.dy; }
+                if (best == 0) break;              // clean; earlier candidates win ties
+            }
+            if (!ac.lblSet && best > UNPLACEABLE) { bestX = cands[0].x0; bestDy = 0; }
         }
 
         const lv_coord_t ndx = (lv_coord_t)(bestX - ac.pos.x);
-        if (ndx != ac.lblDx || bestDy != ac.lblDy) {
+        if (!ac.lblSet || ndx != ac.lblDx || bestDy != ac.lblDy) {
+            ac.lblSet = true;
             // A label can move because a *neighbour* moved, with this glyph perfectly
             // still, so repaint it here -- interp_step only invalidates what it moves.
             lv_area_t inv = glyph_bbox(ac.pos);
