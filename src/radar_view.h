@@ -68,6 +68,10 @@ int  theme();
 void cycleTheme();
 void setThemeChangedCb(void (*cb)(int theme));   // called when the theme changes (for persistence)
 void setRangeLabelVisible(bool v);               // hide the built-in range label (UI shows its own)
+// Rectangle on the scope that floating aircraft labels must avoid -- the zoom pill
+// sits on top of the scope and was hiding the callsign of anything due south. Passed
+// in rather than recomputed here so the pill's geometry stays defined in one place.
+void setLabelKeepOut(int x1, int y1, int x2, int y2);   // x2 < x1 clears
 void setStillMode(bool on);                     // park every looping animation (screenshot capture)
 void setSweepEnabled(bool on);                   // show/hide the rotating sweep line
 bool sweepEnabled();

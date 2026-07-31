@@ -1800,6 +1800,17 @@ void ui_create(void) {
     lv_obj_set_style_text_color(s_zoomLbl, lv_color_hex(radar::themeAccent()), 0);
     lv_obj_center(s_zoomLbl);
 
+    // Tell the scope where the pill sits so floating aircraft labels route around it.
+    // The pill is opaque and drawn over the scope, so anything due south lost its
+    // callsign behind it. Read the laid-out coordinates rather than recomputing the
+    // alignment here, so this cannot drift if the pill is ever moved or resized.
+    lv_obj_update_layout(s_zoomBtn);
+    {
+        lv_area_t ko;
+        lv_obj_get_coords(s_zoomBtn, &ko);
+        radar::setLabelKeepOut(ko.x1, ko.y1, ko.x2, ko.y2);
+    }
+
     // top status HUD (wifi / aircraft count / clock); white reads on both themes.
     // WiFi is a 4-bar signal meter: bar count = RSSI strength, colour = feed health.
     s_hudWifi = lv_obj_create(s_tileRadar);

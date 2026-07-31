@@ -158,6 +158,7 @@ static uint32_t    s_animStartMs  = 0;
 static uint32_t    s_pollMs       = POLL_INTERVAL_MS;
 static int         s_frameCtr     = 0;
 static lv_coord_t  s_cx = SCREEN_CX, s_cy = SCREEN_CY;
+static lv_area_t   s_keepOut = { 0, 0, -1, -1 };   // empty until ui.cpp reports the pill
 static std::string s_selHex;
 
 struct FlowSeg { lv_point_t a, b; uint16_t gen; };   // gen = the poll it was laid down on
@@ -856,22 +857,71 @@ static void ac_draw_cb(lv_event_t *e) {
 
         // floating labels (phosphor only; orb keeps clean balls + the tap card)
         if (!drg) {
-            lv_draw_label_dsc_t lc;
-            lv_draw_label_dsc_init(&lc);
             // Bigger panel gets a bigger label font as well as a scaled offset -- keeping
             // 14 px text beside a glyph half again as large reads as an afterthought.
             const bool bigPanel = (SCREEN_W >= 600);
-            lc.font = (s_bigText || bigPanel) ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+            const lv_font_t *fc = (s_bigText || bigPanel) ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+            const lv_font_t *fa = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+
+            // Labels used to be pinned to the right of the glyph unconditionally. On a round
+            // panel that runs them off the bezel near the rim, and at the bottom of the scope
+            // it buried them under the zoom pill -- an aircraft due south showed two letters
+            // of its callsign. Measure the text, then take the first placement that fits
+            // inside the glass and clears the chrome.
+            lv_point_t szc = { 0, 0 }, sza = { 0, 0 };
+            if (ac.call[0])
+                lv_txt_get_size(&szc, ac.call, fc, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (ac.altTxt[0])
+                lv_txt_get_size(&sza, ac.altTxt, fa, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            const lv_coord_t wmax = LV_MAX(szc.x, sza.x);
+            const lv_coord_t gap  = (lv_coord_t)(12 * gk);
+            const lv_coord_t yTop = (lv_coord_t)(ac.pos.y - 14 * gk);
+            const lv_coord_t yBot = (lv_coord_t)(ac.pos.y + 26 * gk);
+            const lv_coord_t rGlass = (lv_coord_t)(SCREEN_W / 2 - 3);
+
+            // A placement is good if the whole two-line block stays on the glass and misses
+            // the keep-out. Corner test against the circle: conservative, and cheap enough
+            // to run per contact per frame.
+            auto fits = [&](lv_coord_t x0, lv_coord_t dy) {
+                const lv_coord_t x1 = (lv_coord_t)(x0 + wmax);
+                const lv_coord_t y0 = (lv_coord_t)(yTop + dy), y1 = (lv_coord_t)(yBot + dy);
+                const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
+                for (int i = 0; i < 2; ++i) for (int j = 0; j < 2; ++j) {
+                    const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
+                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return false;
+                }
+                if (s_keepOut.x2 >= s_keepOut.x1 && s_keepOut.y2 >= s_keepOut.y1 &&
+                    x0 <= s_keepOut.x2 && x1 >= s_keepOut.x1 &&
+                    y0 <= s_keepOut.y2 && y1 >= s_keepOut.y1) return false;
+                return true;
+            };
+
+            const lv_coord_t lift = (lv_coord_t)(40 * gk);
+            struct Cand { lv_coord_t x0, dy; };
+            const Cand cands[] = {
+                { (lv_coord_t)(ac.pos.x + gap),              0 },          // right (preferred)
+                { (lv_coord_t)(ac.pos.x - gap - wmax),       0 },          // left
+                { (lv_coord_t)(ac.pos.x - wmax / 2),   (lv_coord_t)(-lift) },  // above
+                { (lv_coord_t)(ac.pos.x - wmax / 2),   (lv_coord_t)( lift) },  // below
+            };
+            lv_coord_t px = cands[0].x0, pdy = 0;
+            for (const Cand &c2 : cands) {
+                if (fits(c2.x0, c2.dy)) { px = c2.x0; pdy = c2.dy; break; }
+            }
+
+            lv_draw_label_dsc_t lc;
+            lv_draw_label_dsc_init(&lc);
+            lc.font = fc;
             lc.color = s_cInk;
-            lv_area_t a1 = { (lv_coord_t)(ac.pos.x + 12 * gk), (lv_coord_t)(ac.pos.y - 14 * gk),
-                             (lv_coord_t)(ac.pos.x + 168 * gk), (lv_coord_t)(ac.pos.y + 4 * gk) };
+            lv_area_t a1 = { px, (lv_coord_t)(yTop + pdy),
+                             (lv_coord_t)(px + wmax), (lv_coord_t)(ac.pos.y + 4 * gk + pdy) };
             if (ac.call[0]) lv_draw_label(d, &lc, &a1, ac.call, NULL);
             lv_draw_label_dsc_t la;
             lv_draw_label_dsc_init(&la);
-            la.font = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+            la.font = fa;
             la.color = ac.color;
-            lv_area_t a2 = { a1.x1, (lv_coord_t)(ac.pos.y + 4 * gk),
-                             a1.x2, (lv_coord_t)(ac.pos.y + 26 * gk) };
+            lv_area_t a2 = { px, (lv_coord_t)(ac.pos.y + 4 * gk + pdy),
+                             (lv_coord_t)(px + wmax), (lv_coord_t)(yBot + pdy) };
             if (ac.altTxt[0]) lv_draw_label(d, &la, &a2, ac.altTxt, NULL);
         }
     }
@@ -983,6 +1033,11 @@ void setRangeLabelVisible(bool v) { s_rangeLblVisible = v; if (s_rangeLbl) show(
 // pulse are on infinite timers -- without this the same build yields a different image on
 // every run (it showed up as ~18 pixels drifting in a box around the centre marker).
 // Only the simulator calls this; the sweep toggle in settings stays a separate setting.
+void setLabelKeepOut(int x1, int y1, int x2, int y2) {
+    s_keepOut.x1 = (lv_coord_t)x1; s_keepOut.y1 = (lv_coord_t)y1;
+    s_keepOut.x2 = (lv_coord_t)x2; s_keepOut.y2 = (lv_coord_t)y2;
+}
+
 void setStillMode(bool on) {
     setSweepEnabled(!on);
     if (!s_pulse) return;
