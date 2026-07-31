@@ -158,7 +158,10 @@ static uint32_t    s_animStartMs  = 0;
 static uint32_t    s_pollMs       = POLL_INTERVAL_MS;
 static int         s_frameCtr     = 0;
 static lv_coord_t  s_cx = SCREEN_CX, s_cy = SCREEN_CY;
-static lv_area_t   s_keepOut = { 0, 0, -1, -1 };   // empty until ui.cpp reports the pill
+static lv_area_t   s_keepOut[radar::KEEPOUT_SLOTS] = { { 0, 0, -1, -1 }, { 0, 0, -1, -1 } };
+// Chrome the scope must route labels around: the zoom pill (always up) and the detail
+// card (only while a contact is selected). Both are opaque and drawn over the scope.
+static inline bool keepout_live(const lv_area_t &k) { return k.x2 >= k.x1 && k.y2 >= k.y1; }
 static std::string s_selHex;
 
 struct FlowSeg { lv_point_t a, b; uint16_t gen; };   // gen = the poll it was laid down on
@@ -517,12 +520,15 @@ static inline lv_area_t glyph_bbox(lv_point_t p) {
     // Contacts near the chrome get their labels re-routed and can draw well outside the
     // box above. Widen only for those: the box is repainted whenever the contact moves,
     // and applying the worst case to every aircraft multiplies the redraw area sevenfold.
-    if (!orb() && s_keepOut.x2 >= s_keepOut.x1) {
-        const bool near = !(a.x2 + LBL_MAX_DX < s_keepOut.x1 || a.x1 - LBL_MAX_DX > s_keepOut.x2 ||
-                            a.y2 + LBL_MAX_DY < s_keepOut.y1 || a.y1 - LBL_MAX_DY > s_keepOut.y2);
-        if (near) {
+    if (!orb()) {
+        for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
+            const lv_area_t &k = s_keepOut[i];
+            if (!keepout_live(k)) continue;
+            if (a.x2 + LBL_MAX_DX < k.x1 || a.x1 - LBL_MAX_DX > k.x2 ||
+                a.y2 + LBL_MAX_DY < k.y1 || a.y1 - LBL_MAX_DY > k.y2) continue;
             a.x1 = p.x - LBL_MAX_DX; a.y1 = p.y - LBL_MAX_DY;
             a.x2 = p.x + 180;        a.y2 = p.y + LBL_MAX_DY;
+            break;
         }
     }
     return a;
@@ -911,9 +917,11 @@ static void ac_draw_cb(lv_event_t *e) {
                     const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
                     if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return false;
                 }
-                if (s_keepOut.x2 >= s_keepOut.x1 && s_keepOut.y2 >= s_keepOut.y1 &&
-                    x0 <= s_keepOut.x2 && x1 >= s_keepOut.x1 &&
-                    y0 <= s_keepOut.y2 && y1 >= s_keepOut.y1) return false;
+                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
+                    const lv_area_t &k = s_keepOut[i];
+                    if (!keepout_live(k)) continue;
+                    if (x0 <= k.x2 && x1 >= k.x1 && y0 <= k.y2 && y1 >= k.y1) return false;
+                }
                 return true;
             };
 
@@ -923,14 +931,27 @@ static void ac_draw_cb(lv_event_t *e) {
             // still landed on it, so the code silently fell back to the overlapping one.
             const lv_coord_t pad  = (lv_coord_t)(4 * gk);
             const lv_coord_t midX = (lv_coord_t)(ac.pos.x - wmax / 2);
-            const lv_coord_t clearAbove = (lv_coord_t)(s_keepOut.y1 - pad - yBot);
-            const lv_coord_t clearBelow = (lv_coord_t)(s_keepOut.y2 + pad - yTop);
+            // Escape routes are measured against whichever piece of chrome the preferred
+            // placement actually lands on, so the offsets suit the obstacle in the way.
+            lv_area_t blocker = { 0, 0, -1, -1 };
+            {
+                const lv_coord_t rx0 = (lv_coord_t)(ac.pos.x + gap), rx1 = (lv_coord_t)(rx0 + wmax);
+                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
+                    const lv_area_t &k = s_keepOut[i];
+                    if (!keepout_live(k)) continue;
+                    if (rx0 <= k.x2 && rx1 >= k.x1 && yTop <= k.y2 && yBot >= k.y1) { blocker = k; break; }
+                }
+            }
+            const lv_coord_t bx1 = keepout_live(blocker) ? blocker.x1 : (lv_coord_t)0;
+            const lv_coord_t bx2 = keepout_live(blocker) ? blocker.x2 : (lv_coord_t)0;
+            const lv_coord_t clearAbove = (lv_coord_t)(blocker.y1 - pad - yBot);
+            const lv_coord_t clearBelow = (lv_coord_t)(blocker.y2 + pad - yTop);
             struct Cand { lv_coord_t x0, dy; };
             const Cand cands[] = {
                 { (lv_coord_t)(ac.pos.x + gap),          0 },            // right (preferred)
                 { (lv_coord_t)(ac.pos.x - gap - wmax),   0 },            // left
-                { (lv_coord_t)(s_keepOut.x2 + pad),      0 },            // clear of it, right
-                { (lv_coord_t)(s_keepOut.x1 - pad - wmax), 0 },          // clear of it, left
+                { (lv_coord_t)(bx2 + pad),               0 },            // clear of it, right
+                { (lv_coord_t)(bx1 - pad - wmax),        0 },            // clear of it, left
                 { midX, clearAbove },                                    // above it
                 { midX, clearBelow },                                    // below it
             };
@@ -1066,9 +1087,16 @@ void setRangeLabelVisible(bool v) { s_rangeLblVisible = v; if (s_rangeLbl) show(
 // pulse are on infinite timers -- without this the same build yields a different image on
 // every run (it showed up as ~18 pixels drifting in a box around the centre marker).
 // Only the simulator calls this; the sweep toggle in settings stays a separate setting.
-void setLabelKeepOut(int x1, int y1, int x2, int y2) {
-    s_keepOut.x1 = (lv_coord_t)x1; s_keepOut.y1 = (lv_coord_t)y1;
-    s_keepOut.x2 = (lv_coord_t)x2; s_keepOut.y2 = (lv_coord_t)y2;
+void setLabelKeepOut(int slot, int x1, int y1, int x2, int y2) {
+    if (slot < 0 || slot >= radar::KEEPOUT_SLOTS) return;
+    lv_area_t &k = s_keepOut[slot];
+    const bool changed = k.x1 != (lv_coord_t)x1 || k.y1 != (lv_coord_t)y1 ||
+                         k.x2 != (lv_coord_t)x2 || k.y2 != (lv_coord_t)y2;
+    k.x1 = (lv_coord_t)x1; k.y1 = (lv_coord_t)y1;
+    k.x2 = (lv_coord_t)x2; k.y2 = (lv_coord_t)y2;
+    // The card appears and disappears under the user's finger, and labels near it move
+    // when it does. Repaint the scope so they are not left drawn at the old spot.
+    if (changed && s_acLayer) lv_obj_invalidate(s_acLayer);
 }
 
 void setStillMode(bool on) {

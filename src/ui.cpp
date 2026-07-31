@@ -244,6 +244,7 @@ static void refresh_card(void) {
     if (s_vesselCard && !s_vesselShown) lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
     if (!radar::selected(in)) {
         lv_obj_add_flag(s_card, LV_OBJ_FLAG_HIDDEN);
+        radar::setLabelKeepOut(radar::KEEPOUT_CARD, 0, 0, -1, -1);   // card gone: free the area
         if (s_photo)       lv_obj_add_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
         if (s_photoCredit) lv_obj_add_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         s_lastRouteReq[0] = 0;
@@ -271,6 +272,15 @@ static void refresh_card(void) {
         }
     }
     lv_obj_clear_flag(s_card, LV_OBJ_FLAG_HIDDEN);
+    // The card is opaque and sits over the scope, so tell the scope to route floating
+    // labels around it too. Read the laid-out rectangle: the card grows and shrinks with
+    // its contents (route line, airline logo), so a fixed guess would go stale.
+    lv_obj_update_layout(s_card);
+    {
+        lv_area_t ck;
+        lv_obj_get_coords(s_card, &ck);
+        radar::setLabelKeepOut(radar::KEEPOUT_CARD, ck.x1, ck.y1, ck.x2, ck.y2);
+    }
     if (s_vesselCard) {                     // an aircraft selection replaces the vessel card
         lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
         s_vesselShown = false;
@@ -1808,7 +1818,7 @@ void ui_create(void) {
     {
         lv_area_t ko;
         lv_obj_get_coords(s_zoomBtn, &ko);
-        radar::setLabelKeepOut(ko.x1, ko.y1, ko.x2, ko.y2);
+        radar::setLabelKeepOut(radar::KEEPOUT_ZOOM, ko.x1, ko.y1, ko.x2, ko.y2);
     }
 
     // top status HUD (wifi / aircraft count / clock); white reads on both themes.

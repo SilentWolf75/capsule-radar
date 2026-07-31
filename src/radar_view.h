@@ -71,7 +71,8 @@ void setRangeLabelVisible(bool v);               // hide the built-in range labe
 // Rectangle on the scope that floating aircraft labels must avoid -- the zoom pill
 // sits on top of the scope and was hiding the callsign of anything due south. Passed
 // in rather than recomputed here so the pill's geometry stays defined in one place.
-void setLabelKeepOut(int x1, int y1, int x2, int y2);   // x2 < x1 clears
+enum { KEEPOUT_ZOOM = 0, KEEPOUT_CARD = 1, KEEPOUT_SLOTS = 2 };
+void setLabelKeepOut(int slot, int x1, int y1, int x2, int y2);   // x2 < x1 clears
 void setStillMode(bool on);                     // park every looping animation (screenshot capture)
 void setSweepEnabled(bool on);                   // show/hide the rotating sweep line
 bool sweepEnabled();
