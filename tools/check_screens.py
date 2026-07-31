@@ -33,6 +33,7 @@ TOLERANCE = {}
 # (x0, y0, x1, y1) in fractions of the screen, ignored during comparison.
 MASKS = {
     "clock": [(0.20, 0.24, 0.80, 0.50)],   # time + date: real wall clock
+    "about": [(0.30, 0.35, 0.75, 0.39)],   # BUILD line: __DATE__ moves every day
 }
 
 

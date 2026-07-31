@@ -247,6 +247,11 @@ int main(int argc, char **argv) {
         }
         cloud_image_commit(1784397900UL, HOME_LAT_DEFAULT, HOME_LON_DEFAULT);
     }
+    // The zoom pill and the card's TRACK button follow the accent, and re-tinting them
+    // is a separate call that lives in main.cpp on device. Hang it off radar's own
+    // theme-changed hook here so the T key and the screenshot loop both pick it up --
+    // without this the theme references showed green controls on a red scope.
+    radar::setThemeChangedCb([](int) { ui_theme_changed(); });
     ui_on_data_updated();
     printf("[sim] SkyGlass simulator running (%dx%d) with 6 mock aircraft.\n", SIM_W, SIM_H);
 
