@@ -68,6 +68,7 @@ int  theme();
 void cycleTheme();
 void setThemeChangedCb(void (*cb)(int theme));   // called when the theme changes (for persistence)
 void setRangeLabelVisible(bool v);               // hide the built-in range label (UI shows its own)
+void setStillMode(bool on);                     // park every looping animation (screenshot capture)
 void setSweepEnabled(bool on);                   // show/hide the rotating sweep line
 bool sweepEnabled();
 void setAirportsEnabled(bool on);                // show/hide airport markers on the scope

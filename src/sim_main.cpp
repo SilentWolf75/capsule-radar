@@ -337,10 +337,11 @@ int main(int argc, char **argv) {
                 radar::update(g_mockAcs, g_set);
             }
             // Determinism: these images are compared pixel-for-pixel against committed
-            // references, so anything time-dependent has to stop. The sweep is the only
-            // animation on the scope; parking it costs the ability to catch sweep
-            // regressions and buys a stable diff for everything else.
-            radar::setSweepEnabled(false);
+            // references, so anything time-dependent has to stop -- the rotating sweep
+            // wedge and the home marker's 2.6 s pulse. Parking them costs the ability to
+            // catch regressions in those two animations and buys a stable diff for
+            // everything else on the scope.
+            radar::setStillMode(true);
             radar::select(0);                            // select an aircraft so the card shows
             ui_on_data_updated();
             { char wc[12]; if (route_pending(wc, sizeof(wc))) route_store(wc, "Madrid", "London"); }

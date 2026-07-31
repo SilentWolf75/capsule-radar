@@ -898,12 +898,25 @@ static lv_obj_t *make_layer(lv_obj_t *parent, lv_event_cb_t draw_cb) {
     return o;
 }
 
+static void pulse_start(void);
+
 static void pulse_anim_cb(void *obj, int32_t v) {
     lv_obj_t *o = (lv_obj_t *)obj;
     const lv_coord_t dia = 10 + (lv_coord_t)((v * 44) / 100);
     lv_obj_set_size(o, dia, dia);
     lv_obj_center(o);
     lv_obj_set_style_border_opa(o, (lv_opa_t)(220 - v * 220 / 100), 0);
+}
+
+static void pulse_start(void) {
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_pulse);
+    lv_anim_set_exec_cb(&a, pulse_anim_cb);
+    lv_anim_set_values(&a, 0, 100);
+    lv_anim_set_time(&a, 2600);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
 }
 
 namespace radar {
@@ -964,6 +977,19 @@ int  theme() { return s_theme; }
 void cycleTheme() { setTheme(s_theme + 1); }
 void setThemeChangedCb(void (*cb)(int)) { s_themeCb = cb; }
 void setRangeLabelVisible(bool v) { s_rangeLblVisible = v; if (s_rangeLbl) show(s_rangeLbl, v && !orb()); }
+
+// Park every free-running animation on the scope. The screenshot regression net renders
+// each screen and diffs it pixel-for-pixel, and both the sweep wedge and the home-marker
+// pulse are on infinite timers -- without this the same build yields a different image on
+// every run (it showed up as ~18 pixels drifting in a box around the centre marker).
+// Only the simulator calls this; the sweep toggle in settings stays a separate setting.
+void setStillMode(bool on) {
+    setSweepEnabled(!on);
+    if (!s_pulse) return;
+    lv_anim_del(s_pulse, pulse_anim_cb);
+    if (on) pulse_anim_cb(s_pulse, 0);   // park at the start of the cycle
+    else    pulse_start();
+}
 
 void setSweepEnabled(bool on) {
     s_sweepEnabled = on;
@@ -1087,14 +1113,7 @@ void init(void *lv_parent) {
     lv_obj_set_style_border_color(s_pulse, COL_INK, 0);
     lv_obj_set_style_border_width(s_pulse, 2, 0);
     lv_obj_clear_flag(s_pulse, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, s_pulse);
-    lv_anim_set_exec_cb(&a, pulse_anim_cb);
-    lv_anim_set_values(&a, 0, 100);
-    lv_anim_set_time(&a, 2600);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&a);
+    pulse_start();
 
     s_centerDot = lv_obj_create(parent);
     lv_obj_remove_style_all(s_centerDot);
