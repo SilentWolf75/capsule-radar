@@ -914,9 +914,21 @@ static void ac_draw_cb(lv_event_t *e) {
                 { midX, clearBelow },                                    // below it
             };
             lv_coord_t px = cands[0].x0, pdy = 0;
-            for (const Cand &c2 : cands) {
-                if (fits(c2.x0, c2.dy)) { px = c2.x0; pdy = c2.dy; break; }
+            int chosen = -1;
+            for (int ci = 0; ci < (int)(sizeof(cands) / sizeof(cands[0])); ++ci) {
+                if (fits(cands[ci].x0, cands[ci].dy)) {
+                    px = cands[ci].x0; pdy = cands[ci].dy; chosen = ci; break;
+                }
             }
+#if !defined(ARDUINO)
+            if (ac.call[0]) {
+                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d
+",
+                       ac.call, (int)ac.pos.x, (int)ac.pos.y, (int)wmax, chosen,
+                       (int)px, (int)pdy, (int)s_keepOut.x1, (int)s_keepOut.y1,
+                       (int)s_keepOut.x2, (int)s_keepOut.y2);
+            }
+#endif
 
             lv_draw_label_dsc_t lc;
             lv_draw_label_dsc_init(&lc);
