@@ -42,4 +42,22 @@ struct NativeWiFi {
 
 static NativeWiFi WiFi;
 
+// PSRAM allocation. There is no PSRAM here, and plain malloc has the same contract, so
+// the capability flag is simply ignored.
+#include <stdlib.h>
+enum { MALLOC_CAP_SPIRAM = 1, MALLOC_CAP_8BIT = 2, MALLOC_CAP_INTERNAL = 4 };
+static inline void *heap_caps_malloc(size_t n, int /*caps*/) { return malloc(n); }
+static inline void  heap_caps_free(void *p) { free(p); }
+
+// Chip identity for the About screen. Named for what it is rather than impersonating a
+// board, so a simulator screenshot can never be mistaken for one taken off hardware.
+struct NativeESP {
+    const char *getChipModel()     const { return "native-sim"; }
+    uint32_t    getPsramSize()     const { return 0; }
+    uint32_t    getFlashChipSize() const { return 0; }
+    uint32_t    getCpuFreqMHz()    const { return 0; }
+};
+
+static NativeESP ESP;
+
 #endif  // !ARDUINO
