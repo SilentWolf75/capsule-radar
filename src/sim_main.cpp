@@ -321,8 +321,12 @@ int main(int argc, char **argv) {
             }
         }
 
-        // headless screenshot mode (--shot <prefix>): settle, then grab all views/themes
-        if (shotPath && now - start > 4000) {
+        // headless screenshot mode (--shot <prefix>): settle, then grab all views/themes.
+        // The boot splash covers everything from lv_layer_top() for six seconds and then
+        // fades; the first CI run fired at four and produced thirteen byte-identical
+        // pictures of the splash. Wait for the layer to empty -- that is the actual
+        // condition, and it does not go stale if the splash timing is ever retuned.
+        if (shotPath && now - start > 4000 && lv_obj_get_child_cnt(lv_layer_top()) == 0) {
             for (int k = 0; k < 150; ++k) {              // fast-forward to build up the flow map
                 mock_step(1.0);
                 radar::update(g_mockAcs, g_set);
