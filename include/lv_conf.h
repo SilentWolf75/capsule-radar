@@ -87,7 +87,17 @@
    survivable on a board you can power-cycle, but in the CI simulator it is a job that
    spins until the runner times out with no output at all. Off-device, print the failing
    assert and abort so the log names it. Device builds keep LVGL's default. */
-#if !defined(ARDUINO)
+#if defined(ARDUINO)
+/* On device LVGL's default handler is `while(1);`: the UI core stops dead, the display
+   freezes on its last frame and the web server stops answering, with nothing on the wire
+   to say why. That is exactly how the P4 lockup presented, and it is why that lockup is
+   still unexplained. LVGL logs the failing assertion (LV_LOG_PRINTF) immediately before
+   calling this, so flush that line out and reset: a board that restarts with a reason
+   printed is diagnosable, a frozen one is not. Note it takes a reboot either way -- a
+   frozen board needs the plug pulled. */
+#define LV_ASSERT_HANDLER_INCLUDE "lv_assert_hook.h"
+#define LV_ASSERT_HANDLER   do { fflush(stdout); esp_restart(); } while (0);
+#else
 #define LV_ASSERT_HANDLER_INCLUDE <stdio.h>
 /* LVGL logs the failing assert (LV_LOG_PRINTF) just before calling this, so the flush is
    what actually gets it out of the pipe buffer; __builtin_trap needs no further header. */
