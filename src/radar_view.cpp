@@ -26,7 +26,12 @@
 #include <esp_heap_caps.h>
 #endif
 #if !defined(ARDUINO)
-#include "native_compat.h"       // millis / micros for the simulator
+            if (ac.call[0]) {
+                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d\n",
+                       ac.call, (int)ac.pos.x, (int)ac.pos.y, (int)wmax, chosen,
+                       (int)px, (int)pdy, (int)s_keepOut.x1, (int)s_keepOut.y1,
+                       (int)s_keepOut.x2, (int)s_keepOut.y2);
+            }
 #endif
 
 #ifndef M_PI
