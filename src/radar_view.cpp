@@ -27,7 +27,6 @@
 #endif
 #if !defined(ARDUINO)
 #include "native_compat.h"       // millis / micros for the simulator
-#include <stdio.h>              // TEMP placement trace
 #endif
 
 #ifndef M_PI
@@ -505,10 +504,27 @@ static void wedge_bbox(float deg, lv_area_t *out) {
 
 // glyph + label bounding box (for partial invalidation during the glide).
 // Must cover the label areas drawn in the aircraft layer (they grew for large-text mode).
+// How far a floating label may be pushed from its glyph when routing around chrome.
+// glyph_bbox() has to cover the result: it is both the per-band draw cull and the
+// invalidate-on-move region, so a label outside it is culled away and never appears.
+#define LBL_MAX_DX 135
+#define LBL_MAX_DY 120
+
 static inline lv_area_t glyph_bbox(lv_point_t p) {
     lv_area_t a;
     if (orb()) { a.x1 = p.x - 30; a.y1 = p.y - 30; a.x2 = p.x + 30;  a.y2 = p.y + 30; }
     else          { a.x1 = p.x - 22; a.y1 = p.y - 22; a.x2 = p.x + 174; a.y2 = p.y + 32; }
+    // Contacts near the chrome get their labels re-routed and can draw well outside the
+    // box above. Widen only for those: the box is repainted whenever the contact moves,
+    // and applying the worst case to every aircraft multiplies the redraw area sevenfold.
+    if (!orb() && s_keepOut.x2 >= s_keepOut.x1) {
+        const bool near = !(a.x2 + LBL_MAX_DX < s_keepOut.x1 || a.x1 - LBL_MAX_DX > s_keepOut.x2 ||
+                            a.y2 + LBL_MAX_DY < s_keepOut.y1 || a.y1 - LBL_MAX_DY > s_keepOut.y2);
+        if (near) {
+            a.x1 = p.x - LBL_MAX_DX; a.y1 = p.y - LBL_MAX_DY;
+            a.x2 = p.x + 180;        a.y2 = p.y + LBL_MAX_DY;
+        }
+    }
     return a;
 }
 static inline void area_union(lv_area_t &d, const lv_area_t &s) {
@@ -884,6 +900,10 @@ static void ac_draw_cb(lv_event_t *e) {
             // the keep-out. Corner test against the circle: conservative, and cheap enough
             // to run per contact per frame.
             auto fits = [&](lv_coord_t x0, lv_coord_t dy) {
+                // Never accept a placement glyph_bbox() does not cover: the box is the
+                // draw cull, so a label outside it is silently dropped rather than moved.
+                if (x0 < ac.pos.x - LBL_MAX_DX || (lv_coord_t)(x0 + wmax) > ac.pos.x + 180) return false;
+                if (dy < -LBL_MAX_DY || dy > LBL_MAX_DY) return false;
                 const lv_coord_t x1 = (lv_coord_t)(x0 + wmax);
                 const lv_coord_t y0 = (lv_coord_t)(yTop + dy), y1 = (lv_coord_t)(yBot + dy);
                 const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
@@ -921,13 +941,6 @@ static void ac_draw_cb(lv_event_t *e) {
                     px = cands[ci].x0; pdy = cands[ci].dy; chosen = ci; break;
                 }
             }
-#if !defined(ARDUINO)   /* TEMP placement trace */
-            if (ac.call[0])
-                printf("[lbl] %-8s pos=%d,%d w=%d cand=%d px=%d dy=%d ko=%d,%d,%d,%d\n",
-                       ac.call, (int)ac.pos.x, (int)ac.pos.y, (int)wmax, chosen,
-                       (int)px, (int)pdy, (int)s_keepOut.x1, (int)s_keepOut.y1,
-                       (int)s_keepOut.x2, (int)s_keepOut.y2);
-#endif
 
             lv_draw_label_dsc_t lc;
             lv_draw_label_dsc_init(&lc);
