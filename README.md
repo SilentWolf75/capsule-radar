@@ -216,13 +216,17 @@ hours, sounds, firmware update and WiFi reset. Settings persist in NVS.
 
 `/diag` returns a health snapshot as JSON — free heap, minimum heap
 since boot, largest contiguous internal block, free PSRAM, aircraft counts, and why the last
-photo fetch succeeded or failed. It exists so those numbers can be read over WiFi instead of
+photo fetch succeeded or failed. `lv_free` / `lv_pct` / `lv_biggest` / `lv_frag` cover the
+fixed LVGL object pool: exhausting it used to freeze the UI core outright, so the largest
+free block and the fragmentation are the numbers to read when the display stops responding. It exists so those numbers can be read over WiFi instead of
 only from a serial cable:
 
 ```json
-{"fw":"1.15.0","uptime_s":1520,"heap":110616,"heap_min":50968,"heap_largest":32756,
- "psram":5108176,"aircraft":26,"max_on_screen":120,"feed_cap":120,"photo":"ok",
- "fps":12.1,"frame_ms":83}
+{"fw":"1.16.0","uptime_s":454,"heap":128468,"heap_min":78824,"heap_largest":45044,
+ "psram":4329612,"aircraft":37,"max_on_screen":120,"feed_cap":120,
+ "lv_free":34264,"lv_pct":48,"lv_biggest":32788,"lv_frag":5,"photo":"",
+ "fps":51.7,"draw_us":3131,"step_avg":2.89,"step_max":2.89,"frame_ms":161,
+ "lvgl_ms":144.0,"rest_ms":19.9}
 ```
 
 ## Screenshots
