@@ -32,7 +32,7 @@
 #define UI_SOFT  lv_color_hex(0x9AFFC8)
 #define UI_DIM   lv_color_hex(0x5F7A6C)
 #define UI_PANEL lv_color_hex(0x0C160F)
-#define UI_EMERG lv_color_hex(0xFF5A3C)
+#define UI_EMERG lv_color_hex(0xFF2D95)   // matches COL_EMERG on the scope
 #define UI_MIL   lv_color_hex(0xC77DFF)   // matches the scope's military brackets
 #define UI_AMBER lv_color_hex(0xFF9E0B)
 #define UI_CYAN  lv_color_hex(0x00E5FF)

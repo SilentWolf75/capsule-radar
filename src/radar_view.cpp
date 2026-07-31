@@ -38,7 +38,12 @@
 #define COL_LEAD   lv_color_hex(0x3DFF9A)
 #define COL_INK    lv_color_hex(0xEAFFF3)
 #define COL_SOFT   lv_color_hex(0x9AFFC8)
-#define COL_EMERG  lv_color_hex(0xFF5A3C)
+// Emergency squawk. Magenta rather than red: the altitude ramp already runs orange-red
+// (sub-3,000 ft) through amber, lime and green to cyan, and this used to be the exact
+// same value as the sub-3,000 ft band -- so a 7700 looked identical to any low
+// aircraft, which is the one case where it must not. Nothing else on the scope is
+// magenta on any theme, which is the point: an emergency may break the palette.
+#define COL_EMERG  lv_color_hex(0xFF2D95)
 // coastline outline — steel blue, deliberately off the red/amber/lime/green/cyan
 // altitude-trail palette so land never reads as an aircraft track.
 #define COAST_COLOR lv_color_hex(0x4E86C6)
