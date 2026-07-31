@@ -1806,11 +1806,13 @@ void setup() {
         radar::sweepPerf(&sfps, &sdraw, &savg, &smax);
         lv_mem_monitor_t lvmem;
         lv_mem_monitor(&lvmem);      // LVGL pool headroom: exhausting it hangs the UI core
-        char j[480];
+                                     // outright -- LVGL's assert handler is a bare while(1)
+        char j[560];
         snprintf(j, sizeof(j),
                  "{\"fw\":\"%s\",\"uptime_s\":%lu,\"heap\":%u,\"heap_min\":%u,"
                  "\"heap_largest\":%u,\"psram\":%u,\"aircraft\":%d,\"max_on_screen\":%d,"
-                 "\"feed_cap\":%d,\"lv_free\":%u,\"lv_pct\":%u,\"photo\":\"%s\","
+                 "\"feed_cap\":%d,\"lv_free\":%u,\"lv_pct\":%u,"
+                 "\"lv_biggest\":%u,\"lv_frag\":%u,\"photo\":\"%s\","
                  "\"fps\":%.1f,\"draw_us\":%u,\"step_avg\":%.2f,\"step_max\":%.2f,\"frame_ms\":%u,"
                  "\"lvgl_ms\":%.1f,\"rest_ms\":%.1f}",
                  FW_VERSION, (unsigned long)(millis() / 1000),
@@ -1818,6 +1820,12 @@ void setup() {
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                  (unsigned)ESP.getFreePsram(), (int)g_snap.size(), g_maxAc,
                  ADSB_MAX_AIRCRAFT, (unsigned)lvmem.free_size, (unsigned)lvmem.used_pct,
+                 // free_size alone does not predict an allocation failure: LVGL asks for one
+                 // contiguous block, so the biggest free block and the fragmentation are
+                 // what decide it. (lvmem.max_used is deliberately not reported -- LVGL
+                 // only adjusts its running total in lv_mem_alloc and lv_mem_free, never
+                 // in lv_mem_realloc, so it reads about half the real figure.)
+                 (unsigned)lvmem.free_biggest_size, (unsigned)lvmem.frag_pct,
                  photo_note_get(), sfps, sdraw, savg, smax, (unsigned)radar::sweepFrameMs(), g_loopLvglMs, g_loopRestMs);
         g_web.send(200, "application/json", j);
     });

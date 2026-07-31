@@ -673,6 +673,12 @@ static void build_list(void) {
     // a handful of contacts to dozens. Exhausting the pool is not a graceful failure in
     // LVGL: the allocator asserts and spins, taking the display and the web server with
     // it. The list is nearest-first, so a cap keeps the useful end.
+    //
+    // Note this is a worst-case guard, not an explanation of the P4 list lockup. Measured
+    // on both boards afterwards: on the list the P4 sits at 37% of its pool with a 70 KB
+    // largest free block and 3% fragmentation, the S3 at 65% with 21 KB contiguous and
+    // 10%. Neither is anywhere near an allocation failure, so whatever froze the P4 that
+    // day was something else.
     const int total = radar::count();
     const int n = total < UI_LIST_MAX_ROWS ? total : UI_LIST_MAX_ROWS;
     for (int i = 0; i < n; ++i) {

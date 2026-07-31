@@ -60,6 +60,10 @@ static const float RANGE_STEPS_KM[] = {1.60934f, 4.82803f, 10.0f, 20.0f, 30.0f, 
 #define ADSB_HTTPS_INSECURE 1               // 1 = setInsecure() (hobby). 0 = use pinned root CA.
 // Rows the contact list will build. Bounded because each row is LVGL pool memory and
 // the pool is fixed; the list is nearest-first so the cap keeps the contacts that matter.
+// Measured on hardware at ~437 bytes per row, so the cap is worth ~10.5 KB of pool. At
+// the couple of dozen contacts a local receiver typically shows it changes nothing; what
+// it protects against is ADSB_MAX_AIRCRAFT in busy airspace, where 120 rows would want
+// ~52 KB and the S3 only has ~23 KB of pool free once every screen has been visited.
 #define UI_LIST_MAX_ROWS    24
 
 #define ADSB_MAX_AIRCRAFT   120             // hard cap parsed per poll (protect RAM in busy areas)
