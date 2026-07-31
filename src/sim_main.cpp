@@ -59,6 +59,11 @@ static void sdl_mouse_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
                                                       : LV_INDEV_STATE_RELEASED;
 }
 
+// The AIS client is device-only (WebSocket over TLS). The UI asks whether a key is
+// configured so it can explain an empty marine list; off-device the honest answer is
+// "no key", which is also what makes the list screen deterministic in CI.
+bool ais_has_key() { return false; }
+
 // ---- mock ADS-B data (sim only): 6 aircraft near Dénia that drift along track --
 static std::vector<Aircraft> g_mockAcs;
 static std::vector<Aircraft> g_mockInit;
