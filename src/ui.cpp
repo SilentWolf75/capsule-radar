@@ -16,7 +16,11 @@
 #include "geo.h"
 #include "config.h"
 #include <lvgl.h>
+#if defined(ARDUINO)
 #include <WiFi.h>
+#else
+#include "native_compat.h"   // WiFi / millis stand-ins for the simulator
+#endif
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>

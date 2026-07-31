@@ -143,8 +143,7 @@ int main(int argc, char **argv) {
         // CI runs this headless (SDL_VIDEODRIVER=dummy), where there is no accelerated
         // renderer and no vsync to wait for. Software is fine: the screenshots are read
         // back from the renderer, not shown to anyone.
-        printf("[sim] no accelerated renderer (%s); falling back to software
-", SDL_GetError());
+        printf("[sim] no accelerated renderer (%s); falling back to software\n", SDL_GetError());
         s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_SOFTWARE);
     }
     if (!s_win || !s_ren) {

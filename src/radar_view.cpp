@@ -25,6 +25,9 @@
 #if defined(ESP_PLATFORM)
 #include <esp_heap_caps.h>
 #endif
+#if !defined(ARDUINO)
+#include "native_compat.h"       // millis / micros for the simulator
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

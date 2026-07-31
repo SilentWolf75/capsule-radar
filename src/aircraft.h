@@ -6,6 +6,7 @@
   // Native build (SDL simulator): minimal shim so the data model compiles off-device.
   #include <string>
   #include <cstdint>
+  #include <cmath>          // NAN -- Arduino.h provides this on device
   using String = std::string;
 #endif
 #include <stdint.h>
