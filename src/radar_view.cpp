@@ -905,24 +905,32 @@ static void ac_draw_cb(lv_event_t *e) {
             // A placement is good if the whole two-line block stays on the glass and misses
             // the keep-out. Corner test against the circle: conservative, and cheap enough
             // to run per contact per frame.
-            auto fits = [&](lv_coord_t x0, lv_coord_t dy) {
-                // Never accept a placement glyph_bbox() does not cover: the box is the
-                // draw cull, so a label outside it is silently dropped rather than moved.
-                if (x0 < ac.pos.x - LBL_MAX_DX || (lv_coord_t)(x0 + wmax) > ac.pos.x + 180) return false;
-                if (dy < -LBL_MAX_DY || dy > LBL_MAX_DY) return false;
+            // How bad a placement is, in covered pixels. Zero means clean. Scoring rather
+            // than first-fit matters when a contact sits between the pill and an open
+            // detail card: nothing is clean, and first-fit-or-else-the-first-candidate put
+            // the label straight back under the pill. Least-covered is the useful answer.
+            const int32_t UNPLACEABLE = 1 << 28;
+            auto penalty = [&](lv_coord_t x0, lv_coord_t dy) -> int32_t {
+                // glyph_bbox() is the draw cull, so a label outside it is dropped, not
+                // moved. Never choose one.
+                if (x0 < ac.pos.x - LBL_MAX_DX || (lv_coord_t)(x0 + wmax) > ac.pos.x + 180) return UNPLACEABLE;
+                if (dy < -LBL_MAX_DY || dy > LBL_MAX_DY) return UNPLACEABLE;
                 const lv_coord_t x1 = (lv_coord_t)(x0 + wmax);
                 const lv_coord_t y0 = (lv_coord_t)(yTop + dy), y1 = (lv_coord_t)(yBot + dy);
                 const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
                 for (int i = 0; i < 2; ++i) for (int j = 0; j < 2; ++j) {
                     const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
-                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return false;
+                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return UNPLACEABLE;
                 }
+                int32_t cover = 0;
                 for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
                     const lv_area_t &k = s_keepOut[i];
                     if (!keepout_live(k)) continue;
-                    if (x0 <= k.x2 && x1 >= k.x1 && y0 <= k.y2 && y1 >= k.y1) return false;
+                    const int32_t ow = LV_MIN(x1, k.x2) - LV_MAX(x0, k.x1);
+                    const int32_t oh = LV_MIN(y1, k.y2) - LV_MAX(y0, k.y1);
+                    if (ow > 0 && oh > 0) cover += ow * oh;
                 }
-                return true;
+                return cover;
             };
 
             // Offsets derived from the obstacle, not guessed. A fixed lift is not enough
@@ -956,11 +964,11 @@ static void ac_draw_cb(lv_event_t *e) {
                 { midX, clearBelow },                                    // below it
             };
             lv_coord_t px = cands[0].x0, pdy = 0;
-            int chosen = -1;
-            for (int ci = 0; ci < (int)(sizeof(cands) / sizeof(cands[0])); ++ci) {
-                if (fits(cands[ci].x0, cands[ci].dy)) {
-                    px = cands[ci].x0; pdy = cands[ci].dy; chosen = ci; break;
-                }
+            int32_t best = UNPLACEABLE + 1;
+            for (const Cand &c2 : cands) {
+                const int32_t sc = penalty(c2.x0, c2.dy);
+                if (sc < best) { best = sc; px = c2.x0; pdy = c2.dy; }
+                if (best == 0) break;                 // clean placement; earlier wins ties
             }
 
             lv_draw_label_dsc_t lc;
