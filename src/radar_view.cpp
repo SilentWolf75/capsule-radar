@@ -896,13 +896,22 @@ static void ac_draw_cb(lv_event_t *e) {
                 return true;
             };
 
-            const lv_coord_t lift = (lv_coord_t)(40 * gk);
+            // Offsets derived from the obstacle, not guessed. A fixed lift is not enough
+            // when the glyph is inside the keep-out rather than merely beside it: due south
+            // at long range the aircraft sits under the pill, and every fixed candidate
+            // still landed on it, so the code silently fell back to the overlapping one.
+            const lv_coord_t pad  = (lv_coord_t)(4 * gk);
+            const lv_coord_t midX = (lv_coord_t)(ac.pos.x - wmax / 2);
+            const lv_coord_t clearAbove = (lv_coord_t)(s_keepOut.y1 - pad - yBot);
+            const lv_coord_t clearBelow = (lv_coord_t)(s_keepOut.y2 + pad - yTop);
             struct Cand { lv_coord_t x0, dy; };
             const Cand cands[] = {
-                { (lv_coord_t)(ac.pos.x + gap),              0 },          // right (preferred)
-                { (lv_coord_t)(ac.pos.x - gap - wmax),       0 },          // left
-                { (lv_coord_t)(ac.pos.x - wmax / 2),   (lv_coord_t)(-lift) },  // above
-                { (lv_coord_t)(ac.pos.x - wmax / 2),   (lv_coord_t)( lift) },  // below
+                { (lv_coord_t)(ac.pos.x + gap),          0 },            // right (preferred)
+                { (lv_coord_t)(ac.pos.x - gap - wmax),   0 },            // left
+                { (lv_coord_t)(s_keepOut.x2 + pad),      0 },            // clear of it, right
+                { (lv_coord_t)(s_keepOut.x1 - pad - wmax), 0 },          // clear of it, left
+                { midX, clearAbove },                                    // above it
+                { midX, clearBelow },                                    // below it
             };
             lv_coord_t px = cands[0].x0, pdy = 0;
             for (const Cand &c2 : cands) {
