@@ -153,6 +153,8 @@ static void adsb_task(void*) {
     uint32_t nextWxRadarAt = UINT32_MAX;
     uint32_t nextCloudImageAt = UINT32_MAX;
     uint32_t lastFeedOk = millis();          // self-heal: time of last good (or no-WiFi) poll
+    uint8_t  healStage = 0;                  // 0 none, 1 reassociate attempted
+    uint32_t healActionMs = 0;               // when the last rung ran (see the !conn reset)
     for (;;) {
         const bool conn = (WiFi.status() == WL_CONNECTED);
         if (conn && !wasConnected) {
@@ -168,13 +170,42 @@ static void adsb_task(void*) {
             // mDNS + OTA are started on core 1 (loop) to keep all mDNS use on one core
         }
         wasConnected = conn;
-        // self-heal: a long feed outage while WiFi is up usually means the internal heap
-        // fragmented and the TLS handshake can't allocate -> reboot to recover (settings persist).
-        if (!conn) lastFeedOk = millis();
-        else if (millis() - lastFeedOk > 180000UL) {
-            Serial.println("[adsb] feed stuck >180s with WiFi up -> restarting to recover");
-            delay(100);
-            ESP.restart();
+        // Self-heal. A long feed outage while WiFi still reports connected has been seen
+        // on the P4: every socket fails while WiFi.status() stays WL_CONNECTED and the heap
+        // is healthy (245 KB free when it was caught), so the wedge sits below the status
+        // API -- in the C6 link, not in allocation. A reboot clears it, and that is what
+        // made the device restart on its own; try one cheap thing first.
+        //
+        // A full station restart (WiFi.disconnect(true) + begin) was tried here as a middle
+        // rung and removed: measured on the P4, the station never came back, and because
+        // the reboot below is gated on being connected the device sat unreachable instead
+        // of recovering. Reassociating is the only intermediate step that is known to
+        // return, so it is the only one kept.
+        if (!conn) {
+            if (healStage == 0) {
+                lastFeedOk = millis();          // plain outage: a router reboot must not
+                                                // eventually restart the device
+            } else if (millis() - healActionMs > 60000UL) {
+                // We prodded the radio and it has not come back for a minute. An
+                // unreachable device cannot be recovered remotely, so take the reboot.
+                Serial.println("[adsb] no association since self-heal -> rebooting");
+                delay(100);
+                ESP.restart();
+            }
+        } else {
+            const uint32_t stuckMs = millis() - lastFeedOk;
+            if (stuckMs > 180000UL) {
+                Serial.println("[adsb] feed stuck >180s after reassociating -> rebooting");
+                delay(100);
+                ESP.restart();
+            } else if (stuckMs > 45000UL && healStage < 1) {
+                // Cheapest rung: reassociate. Costs a second or two of link and nothing
+                // else, and on the P4 it is observed to return within a few seconds.
+                Serial.println("[adsb] feed stuck >45s -> reassociating");
+                WiFi.reconnect();
+                healStage = 1;
+                healActionMs = millis();
+            }
         }
         if (g_requery) {                          // display range changed (double-tap zoom)
             g_adsb.begin(g_settings.homeLat, g_settings.homeLon, g_requeryKm);
@@ -198,6 +229,8 @@ static void adsb_task(void*) {
                     g_feedOk = true;
                     const uint32_t receivedMs = millis();
                     lastFeedOk = receivedMs;
+                    healStage = 0;                    // recovered: re-arm the whole ladder
+                    healActionMs = 0;
                     g_lastFeedOkMs = receivedMs;      // HUD: mark data as fresh
 
                     const bool publish = snapshotGate.shouldPublish(
