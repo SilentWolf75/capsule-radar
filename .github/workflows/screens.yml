@@ -18,6 +18,9 @@ on:
 jobs:
   screens:
     runs-on: ubuntu-latest
+    # The render step once wedged in an LVGL assert (whose default handler is `while(1);`)
+    # and would have held the runner for six hours. Bound the whole job as well.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +44,10 @@ jobs:
           mkdir -p shots
           BIN="$(find .pio/build/native -maxdepth 1 -type f -name 'program*' | head -1)"
           echo "simulator binary: $BIN"
-          "$BIN" --shot shots/sim
+          # The render is a few seconds of simulated time; anything past a minute is a
+          # hang, and timeout turns it into a failure with the log intact rather than a
+          # job that runs until the runner gives up.
+          timeout -k 5 90 "$BIN" --shot shots/sim
           ls -l shots
 
       - name: Compare against references

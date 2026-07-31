@@ -77,6 +77,14 @@
 /*==================
    ASSERTS / DEBUG
  *==================*/
+/* LVGL's own default for LV_ASSERT_HANDLER is `while(1);` -- a silent hang. That is
+   survivable on a board you can power-cycle, but in the CI simulator it is a job that
+   spins until the runner times out with no output at all. Off-device, print the failing
+   assert and abort so the log names it. Device builds keep LVGL's default. */
+#if !defined(ARDUINO)
+#define LV_ASSERT_HANDLER_INCLUDE <stdlib.h>
+#define LV_ASSERT_HANDLER   do { fflush(stdout); abort(); } while (0);
+#endif
 #define LV_USE_PERF_MONITOR 0
 #define LV_USE_MEM_MONITOR 0
 #define LV_USE_REFR_DEBUG 0

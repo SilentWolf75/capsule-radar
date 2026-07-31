@@ -126,6 +126,9 @@ static void mock_step(double dt) {
 }
 
 int main(int argc, char **argv) {
+    // Under CI stdout is a pipe and therefore fully buffered; if the run wedges, the
+    // progress printfs die in the buffer. Line-buffering makes the log usable.
+    setvbuf(stdout, NULL, _IOLBF, 0);
     (void)argc; (void)argv;
 
     setvbuf(stdout, NULL, _IOLBF, 0);  // line-buffered: logs appear even when piped to a file
