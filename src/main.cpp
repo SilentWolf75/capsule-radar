@@ -1501,8 +1501,11 @@ static void handleShot() {
     g_web.sendContent("", 0);
 }
 
-static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock)
-    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 7));   // 6 = fires, 7 = about
+static void handleView() {   // pick a screen (0 radar, 1 list, 2 stats, 3 weather, 4 tracked, 5 clock, 6 about)
+    // 0..6: ui_show_view() ignores anything above 6, so accepting 7 here only made
+    // /view?i=7 look like it worked. The old 7 was about, back when 6 was the fires
+    // screen; that screen is gone and about took its place.
+    if (g_web.hasArg("i")) ui_show_view(constrain((int)g_web.arg("i").toInt(), 0, 6));
     if (g_web.hasArg("wx")) ui_set_weather_mode(constrain((int)g_web.arg("wx").toInt(), 0, 2));
     if (g_web.hasArg("icon")) ui_preview_weather_icon(g_web.arg("icon").toInt());
     if (g_web.hasArg("mil")) radar::setMilitaryPreview(g_web.arg("mil").toInt() != 0);

@@ -239,11 +239,14 @@ static void fold_ascii(char *s) {
 }
 
 // ----------------------------------------------------------------- detail card
+static bool s_cardShown = false;   // for the keep-out below: has the card been up?
+
 static void refresh_card(void) {
     AcInfo in;
     if (s_vesselCard && !s_vesselShown) lv_obj_add_flag(s_vesselCard, LV_OBJ_FLAG_HIDDEN);
     if (!radar::selected(in)) {
         lv_obj_add_flag(s_card, LV_OBJ_FLAG_HIDDEN);
+        s_cardShown = false;
         radar::setLabelKeepOut(radar::KEEPOUT_CARD, 0, 0, -1, -1);   // card gone: free the area
         if (s_photo)       lv_obj_add_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
         if (s_photoCredit) lv_obj_add_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
@@ -275,7 +278,11 @@ static void refresh_card(void) {
     // The card is opaque and sits over the scope, so tell the scope to route floating
     // labels around it too. Read the laid-out rectangle: the card grows and shrinks with
     // its contents (route line, airline logo), so a fixed guess would go stale.
-    lv_obj_update_layout(s_card);
+    // Only force the layout when the card first appears: this runs on every data
+    // update, and lv_obj_update_layout walks the subtree. Later growth still lands,
+    // one refresh behind, through the plain coord read.
+    if (!s_cardShown) lv_obj_update_layout(s_card);
+    s_cardShown = true;
     {
         lv_area_t ck;
         lv_obj_get_coords(s_card, &ck);
