@@ -23,16 +23,20 @@ REFS = os.path.join(ROOT, "tests", "screens")
 
 # Percentage of pixels allowed to differ before a screen is called a regression.
 #
-# Zero for everything that is fully determined by the mock data. The clock is the
-# exception: it renders the host's wall clock, so the time and date genuinely change
-# between runs and only the surrounding layout is worth comparing -- hence a band across
-# the text is masked out rather than the whole screen being skipped.
+# Zero for everything: the mock data is fixed and the simulator parks the sweep and the
+# home-marker pulse, so a matching build reproduces every screen exactly. Anything that
+# moves on its own is masked below rather than given a tolerance, because a tolerance
+# large enough to absorb a clock is large enough to hide a shifted label.
 DEFAULT_TOLERANCE = 0.0
 TOLERANCE = {}
 
 # (x0, y0, x1, y1) in fractions of the screen, ignored during comparison.
 MASKS = {
-    "clock": [(0.20, 0.24, 0.80, 0.50)],   # time + date: real wall clock
+    # Time + date. Right now the simulator shows the "--:--" placeholder, but only
+    # because the clock's tick timer never fires during the capture -- time() on the
+    # runner returns a real epoch, so a change to how the shot loop pumps timers would
+    # put a live wall clock here. Masked as insurance, not as a description.
+    "clock": [(0.20, 0.24, 0.80, 0.50)],
     "about": [(0.30, 0.35, 0.75, 0.39)],   # BUILD line: __DATE__ moves every day
 }
 

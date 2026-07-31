@@ -253,6 +253,27 @@ pio run -e native -t exec
 
 Mouse = touch · `T` = switch theme · close the window to quit.
 
+### Screenshot regression net
+
+Every push renders all thirteen screens in that simulator on CI and diffs them
+pixel-for-pixel against the references in `tests/screens/`. Layout bugs are the ones this
+project actually suffers from — text landing on text, rings drifting off their image,
+labels clipped by the round bezel — and until now every one of them was found by flashing
+a board and looking at it.
+
+```bash
+python tools/check_screens.py --shots shots            # compare
+python tools/check_screens.py --shots shots --update   # accept as the new references
+```
+
+When a screen changes on purpose, download the `screens` artifact from the failed run,
+look at the `-actual.png` images, and commit them as the new references. When it changes
+by accident, the run tells you which screen and by how much.
+
+The capture parks the sweep and the home-marker pulse (`radar::setStillMode`) so the
+images are reproducible, and masks the clock's time/date band and the About screen's
+build date, which move on their own.
+
 ## Repo layout
 
 ```
