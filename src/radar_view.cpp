@@ -192,6 +192,8 @@ struct AcDraw {
     double     lat, lon;       // live position (tracked mode: progress along the route)
     uint8_t    cat;            // AcCategory — which silhouette to draw
     int        squawk;
+    lv_coord_t lblW = 0;       // measured label width; text changes rarely, so measure rarely
+    lv_coord_t lblDx = 0, lblDy = 0;   // chosen offset from the glyph (see layout_labels)
     std::vector<lv_point_t> trail;
 };
 static std::vector<AcDraw> s_acs;
@@ -549,6 +551,8 @@ static inline bool area_overlaps(const lv_area_t &a, const lv_area_t &b) {
 // Advance each glyph from its previous position toward the new target (ease-out),
 // invalidating only the small region each one occupies. Self-limiting: when a plane
 // barely moves (far away / slow), nx==pos and it's skipped — near-zero cost.
+static void layout_labels(void);   // defined below; run after every motion step
+
 static void interp_step(void) {
 #if MOTION_INTERP
     if (!s_acLayer || s_acs.empty()) return;
@@ -567,6 +571,111 @@ static void interp_step(void) {
         lv_obj_invalidate_area(s_acLayer, &inv);
     }
 #endif
+    layout_labels();
+}
+
+// Decide where every floating label sits. Deliberately NOT done in the draw callback:
+// LVGL repaints the scope in horizontal bands and the draw loop culls contacts outside
+// the current band, so a decision made there would see a different set of neighbours in
+// each band and could place one label in two different spots within a single frame.
+//
+// Contacts are processed in s_acs order, which is nearest first, so when two labels
+// collide the closer aircraft keeps the better spot.
+static void layout_labels(void) {
+    if (orb() || !s_acLayer) return;
+    const float gk = (float)SCREEN_W / (float)UI_DESIGN_W;
+    const lv_coord_t gap    = (lv_coord_t)(12 * gk);
+    const lv_coord_t pad    = (lv_coord_t)(4 * gk);
+    const lv_coord_t rGlass = (lv_coord_t)(SCREEN_W / 2 - 3);
+    const int32_t UNPLACEABLE = 1 << 28;
+
+    lv_area_t placed[28];
+    int nPlaced = 0;
+
+    for (AcDraw &ac : s_acs) {
+        if (!ac.inRange || ac.lblW <= 0) continue;
+        const lv_coord_t wmax = ac.lblW;
+        const lv_coord_t yTop = (lv_coord_t)(ac.pos.y - 14 * gk);
+        const lv_coord_t yBot = (lv_coord_t)(ac.pos.y + 26 * gk);
+
+        // Escape routes are measured against whichever obstacle the preferred placement
+        // actually lands on -- a piece of chrome, or another aircraft's label.
+        lv_area_t blocker = { 0, 0, -1, -1 };
+        {
+            const lv_coord_t rx0 = (lv_coord_t)(ac.pos.x + gap), rx1 = (lv_coord_t)(rx0 + wmax);
+            for (int i = 0; i < radar::KEEPOUT_SLOTS && !keepout_live(blocker); ++i) {
+                const lv_area_t &k = s_keepOut[i];
+                if (keepout_live(k) && rx0 <= k.x2 && rx1 >= k.x1 && yTop <= k.y2 && yBot >= k.y1)
+                    blocker = k;
+            }
+            for (int i = 0; i < nPlaced && !keepout_live(blocker); ++i) {
+                const lv_area_t &k = placed[i];
+                if (rx0 <= k.x2 && rx1 >= k.x1 && yTop <= k.y2 && yBot >= k.y1) blocker = k;
+            }
+        }
+        const lv_coord_t bx1 = keepout_live(blocker) ? blocker.x1 : (lv_coord_t)0;
+        const lv_coord_t bx2 = keepout_live(blocker) ? blocker.x2 : (lv_coord_t)0;
+
+        struct Cand { lv_coord_t x0, dy; };
+        const lv_coord_t midX = (lv_coord_t)(ac.pos.x - wmax / 2);
+        const Cand cands[] = {
+            { (lv_coord_t)(ac.pos.x + gap),        0 },
+            { (lv_coord_t)(ac.pos.x - gap - wmax), 0 },
+            { (lv_coord_t)(bx2 + pad),             0 },
+            { (lv_coord_t)(bx1 - pad - wmax),      0 },
+            { midX, (lv_coord_t)(blocker.y1 - pad - yBot) },
+            { midX, (lv_coord_t)(blocker.y2 + pad - yTop) },
+        };
+
+        lv_coord_t bestX = cands[0].x0, bestDy = 0;
+        int32_t best = UNPLACEABLE + 1;
+        for (const Cand &c : cands) {
+            const lv_coord_t x0 = c.x0, x1 = (lv_coord_t)(x0 + wmax);
+            const lv_coord_t y0 = (lv_coord_t)(yTop + c.dy), y1 = (lv_coord_t)(yBot + c.dy);
+            int32_t score = 0;
+            // glyph_bbox() is the draw cull, so a label outside it is dropped, not moved.
+            if (x0 < ac.pos.x - LBL_MAX_DX || x1 > ac.pos.x + 180 ||
+                c.dy < -LBL_MAX_DY || c.dy > LBL_MAX_DY) score = UNPLACEABLE;
+            if (score == 0) {
+                const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
+                for (int i = 0; i < 2 && score == 0; ++i) for (int j = 0; j < 2; ++j) {
+                    const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
+                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) { score = UNPLACEABLE; break; }
+                }
+            }
+            if (score == 0) {
+                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
+                    const lv_area_t &k = s_keepOut[i];
+                    if (!keepout_live(k)) continue;
+                    const int32_t ow = LV_MIN(x1, k.x2) - LV_MAX(x0, k.x1);
+                    const int32_t oh = LV_MIN(y1, k.y2) - LV_MAX(y0, k.y1);
+                    if (ow > 0 && oh > 0) score += ow * oh;
+                }
+                for (int i = 0; i < nPlaced; ++i) {
+                    const int32_t ow = LV_MIN(x1, placed[i].x2) - LV_MAX(x0, placed[i].x1);
+                    const int32_t oh = LV_MIN(y1, placed[i].y2) - LV_MAX(y0, placed[i].y1);
+                    if (ow > 0 && oh > 0) score += ow * oh;
+                }
+            }
+            if (score < best) { best = score; bestX = x0; bestDy = c.dy; }
+            if (best == 0) break;                  // clean; earlier candidates win ties
+        }
+
+        const lv_coord_t ndx = (lv_coord_t)(bestX - ac.pos.x);
+        if (ndx != ac.lblDx || bestDy != ac.lblDy) {
+            // A label can move because a *neighbour* moved, with this glyph perfectly
+            // still, so repaint it here -- interp_step only invalidates what it moves.
+            lv_area_t inv = glyph_bbox(ac.pos);
+            lv_obj_invalidate_area(s_acLayer, &inv);
+            ac.lblDx = ndx;
+            ac.lblDy = bestDy;
+        }
+        if (nPlaced < (int)(sizeof(placed) / sizeof(placed[0]))) {
+            lv_area_t r = { bestX, (lv_coord_t)(yTop + bestDy),
+                            (lv_coord_t)(bestX + wmax), (lv_coord_t)(yBot + bestDy) };
+            placed[nPlaced++] = r;
+        }
+    }
 }
 
 static void sweep_timer_cb(lv_timer_t *t) {
@@ -891,90 +1000,12 @@ static void ac_draw_cb(lv_event_t *e) {
             const lv_font_t *fc = (s_bigText || bigPanel) ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
             const lv_font_t *fa = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
 
-            // Labels used to be pinned to the right of the glyph unconditionally. On a round
-            // panel that runs them off the bezel near the rim, and at the bottom of the scope
-            // it buried them under the zoom pill -- an aircraft due south showed two letters
-            // of its callsign. Measure the text, then take the first placement that fits
-            // inside the glass and clears the chrome.
-            lv_point_t szc = { 0, 0 }, sza = { 0, 0 };
-            if (ac.call[0])
-                lv_txt_get_size(&szc, ac.call, fc, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-            if (ac.altTxt[0])
-                lv_txt_get_size(&sza, ac.altTxt, fa, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-            const lv_coord_t wmax = LV_MAX(szc.x, sza.x);
-            const lv_coord_t gap  = (lv_coord_t)(12 * gk);
+            // Placement was decided in layout_labels() -- see there for why it cannot
+            // be done here. This just reads it back.
+            const lv_coord_t wmax = ac.lblW;
             const lv_coord_t yTop = (lv_coord_t)(ac.pos.y - 14 * gk);
             const lv_coord_t yBot = (lv_coord_t)(ac.pos.y + 26 * gk);
-            const lv_coord_t rGlass = (lv_coord_t)(SCREEN_W / 2 - 3);
-
-            // A placement is good if the whole two-line block stays on the glass and misses
-            // the keep-out. Corner test against the circle: conservative, and cheap enough
-            // to run per contact per frame.
-            // How bad a placement is, in covered pixels. Zero means clean. Scoring rather
-            // than first-fit matters when a contact sits between the pill and an open
-            // detail card: nothing is clean, and first-fit-or-else-the-first-candidate put
-            // the label straight back under the pill. Least-covered is the useful answer.
-            const int32_t UNPLACEABLE = 1 << 28;
-            auto penalty = [&](lv_coord_t x0, lv_coord_t dy) -> int32_t {
-                // glyph_bbox() is the draw cull, so a label outside it is dropped, not
-                // moved. Never choose one.
-                if (x0 < ac.pos.x - LBL_MAX_DX || (lv_coord_t)(x0 + wmax) > ac.pos.x + 180) return UNPLACEABLE;
-                if (dy < -LBL_MAX_DY || dy > LBL_MAX_DY) return UNPLACEABLE;
-                const lv_coord_t x1 = (lv_coord_t)(x0 + wmax);
-                const lv_coord_t y0 = (lv_coord_t)(yTop + dy), y1 = (lv_coord_t)(yBot + dy);
-                const lv_coord_t xs2[2] = { x0, x1 }, ys2[2] = { y0, y1 };
-                for (int i = 0; i < 2; ++i) for (int j = 0; j < 2; ++j) {
-                    const int32_t dx = xs2[i] - s_cx, dyy = ys2[j] - s_cy;
-                    if (dx * dx + dyy * dyy > (int32_t)rGlass * rGlass) return UNPLACEABLE;
-                }
-                int32_t cover = 0;
-                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
-                    const lv_area_t &k = s_keepOut[i];
-                    if (!keepout_live(k)) continue;
-                    const int32_t ow = LV_MIN(x1, k.x2) - LV_MAX(x0, k.x1);
-                    const int32_t oh = LV_MIN(y1, k.y2) - LV_MAX(y0, k.y1);
-                    if (ow > 0 && oh > 0) cover += ow * oh;
-                }
-                return cover;
-            };
-
-            // Offsets derived from the obstacle, not guessed. A fixed lift is not enough
-            // when the glyph is inside the keep-out rather than merely beside it: due south
-            // at long range the aircraft sits under the pill, and every fixed candidate
-            // still landed on it, so the code silently fell back to the overlapping one.
-            const lv_coord_t pad  = (lv_coord_t)(4 * gk);
-            const lv_coord_t midX = (lv_coord_t)(ac.pos.x - wmax / 2);
-            // Escape routes are measured against whichever piece of chrome the preferred
-            // placement actually lands on, so the offsets suit the obstacle in the way.
-            lv_area_t blocker = { 0, 0, -1, -1 };
-            {
-                const lv_coord_t rx0 = (lv_coord_t)(ac.pos.x + gap), rx1 = (lv_coord_t)(rx0 + wmax);
-                for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
-                    const lv_area_t &k = s_keepOut[i];
-                    if (!keepout_live(k)) continue;
-                    if (rx0 <= k.x2 && rx1 >= k.x1 && yTop <= k.y2 && yBot >= k.y1) { blocker = k; break; }
-                }
-            }
-            const lv_coord_t bx1 = keepout_live(blocker) ? blocker.x1 : (lv_coord_t)0;
-            const lv_coord_t bx2 = keepout_live(blocker) ? blocker.x2 : (lv_coord_t)0;
-            const lv_coord_t clearAbove = (lv_coord_t)(blocker.y1 - pad - yBot);
-            const lv_coord_t clearBelow = (lv_coord_t)(blocker.y2 + pad - yTop);
-            struct Cand { lv_coord_t x0, dy; };
-            const Cand cands[] = {
-                { (lv_coord_t)(ac.pos.x + gap),          0 },            // right (preferred)
-                { (lv_coord_t)(ac.pos.x - gap - wmax),   0 },            // left
-                { (lv_coord_t)(bx2 + pad),               0 },            // clear of it, right
-                { (lv_coord_t)(bx1 - pad - wmax),        0 },            // clear of it, left
-                { midX, clearAbove },                                    // above it
-                { midX, clearBelow },                                    // below it
-            };
-            lv_coord_t px = cands[0].x0, pdy = 0;
-            int32_t best = UNPLACEABLE + 1;
-            for (const Cand &c2 : cands) {
-                const int32_t sc = penalty(c2.x0, c2.dy);
-                if (sc < best) { best = sc; px = c2.x0; pdy = c2.dy; }
-                if (best == 0) break;                 // clean placement; earlier wins ties
-            }
+            const lv_coord_t px = (lv_coord_t)(ac.pos.x + ac.lblDx), pdy = ac.lblDy;
 
             lv_draw_label_dsc_t lc;
             lv_draw_label_dsc_init(&lc);
@@ -1367,6 +1398,18 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
         d.squawk = ac.squawk;
         if (ac.onGround) snprintf(d.altTxt, sizeof(d.altTxt), "GND");
         else             snprintf(d.altTxt, sizeof(d.altTxt), "%.0f ft", (double)ac.altBaro);
+
+        // Measure the label once here rather than per frame in layout_labels(): the text
+        // only changes when the feed does, while placement is redone on every motion step.
+        {
+            const bool bigPanel = (SCREEN_W >= 600);
+            const lv_font_t *fc = (s_bigText || bigPanel) ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+            const lv_font_t *fa = (s_bigText || bigPanel) ? &lv_font_montserrat_16 : &lv_font_montserrat_12;
+            lv_point_t szc = { 0, 0 }, sza = { 0, 0 };
+            if (d.call[0])   lv_txt_get_size(&szc, d.call,   fc, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (d.altTxt[0]) lv_txt_get_size(&sza, d.altTxt, fa, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            d.lblW = LV_MAX(szc.x, sza.x);
+        }
 
         const std::string key = ac.hex.c_str();
         present.insert(key);
