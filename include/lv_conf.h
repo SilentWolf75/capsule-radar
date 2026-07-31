@@ -82,8 +82,10 @@
    spins until the runner times out with no output at all. Off-device, print the failing
    assert and abort so the log names it. Device builds keep LVGL's default. */
 #if !defined(ARDUINO)
-#define LV_ASSERT_HANDLER_INCLUDE <stdlib.h>
-#define LV_ASSERT_HANDLER   do { fflush(stdout); abort(); } while (0);
+#define LV_ASSERT_HANDLER_INCLUDE <stdio.h>
+/* LVGL logs the failing assert (LV_LOG_PRINTF) just before calling this, so the flush is
+   what actually gets it out of the pipe buffer; __builtin_trap needs no further header. */
+#define LV_ASSERT_HANDLER   do { fflush(stdout); __builtin_trap(); } while (0);
 #endif
 #define LV_USE_PERF_MONITOR 0
 #define LV_USE_MEM_MONITOR 0
