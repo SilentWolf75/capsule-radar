@@ -142,6 +142,57 @@ static const int TZOPTS_N = sizeof(TZOPTS) / sizeof(TZOPTS[0]);
 
 static float queryRadiusKm();   // defined below; the feed task needs it for the fire bbox
 
+// --- setup portal fallback (boards without WiFiManager) ----------------------------
+// The S3 gets this free: WiFiManager's autoConnect() opens a captive portal whenever it
+// cannot reach the stored network. The P4 has no WiFiManager, and it only raised its
+// setup AP when *no* credentials were stored at all -- so a board carrying credentials
+// for one network, powered up somewhere else, sat retrying a network that was not there
+// with no way in and nothing on screen. That is exactly what happened taking it to
+// someone else's house.
+//
+// So: if the station has not associated for a while, bring the setup AP up alongside it.
+// AP_STA rather than AP, so the station keeps trying in the background and the portal
+// disappears by itself if the real network comes back (someone powers the router on, or
+// you carry it home) without needing a reboot.
+#if !BOARD_HAS_WIFIMANAGER
+#ifndef WIFI_PORTAL_AFTER_MS
+#  define WIFI_PORTAL_AFTER_MS 45000UL
+#endif
+static bool     g_setupApUp   = false;
+static bool     g_setupApFail = false;   // radio refused AP mode; say so rather than lie
+static uint32_t g_staWaitMs   = 0;
+
+static void wifi_portal_tick(void) {
+    if (WiFi.status() == WL_CONNECTED) {
+        if (g_setupApUp) {                       // real network is back; drop the portal
+            Serial.println("[wifi] station associated -> taking the setup AP down");
+            WiFi.softAPdisconnect(true);
+            WiFi.mode(WIFI_STA);
+            g_setupApUp = false;
+        }
+        g_staWaitMs = millis();
+        g_setupApFail = false;
+        return;
+    }
+    if (g_setupApUp || g_setupApFail) return;
+    if (g_staWaitMs == 0) { g_staWaitMs = millis(); return; }
+    if (millis() - g_staWaitMs < WIFI_PORTAL_AFTER_MS) return;
+
+    Serial.printf("[wifi] no association after %lus -> raising setup AP '%s'\n",
+                  (unsigned long)(WIFI_PORTAL_AFTER_MS / 1000), BOARD_SETUP_AP);
+    // Keep the station alive so it can still find the stored network on its own.
+    g_setupApUp = WiFi.mode(WIFI_AP_STA) && WiFi.softAP(BOARD_SETUP_AP);
+    if (!g_setupApUp) g_setupApUp = WiFi.mode(WIFI_AP) && WiFi.softAP(BOARD_SETUP_AP);
+    if (g_setupApUp) {
+        Serial.printf("[wifi] setup AP up: join '%s', open http://%s/\n",
+                      BOARD_SETUP_AP, WiFi.softAPIP().toString().c_str());
+    } else {
+        g_setupApFail = true;   // do not spin retrying a mode this radio will not enter
+        Serial.println("[wifi] setup AP FAILED - set credentials over serial: wifi <ssid> <password>");
+    }
+}
+#endif
+
 // ---- networking task (core 0): fetch + parse, never touches the display ----
 static void adsb_task(void*) {
     std::vector<Aircraft> fresh;
@@ -1996,13 +2047,32 @@ void loop() {
         // freeze but the icon would otherwise stay white.
         const bool feedFresh = wifiUp && (millis() - g_lastFeedOkMs < 18000UL);
         ui_set_status(wifiUp, feedFresh, rssi, clk);
+#if !BOARD_HAS_WIFIMANAGER
+        wifi_portal_tick();
+#endif
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
             snprintf(net, sizeof(net), "Configure at\n" BOARD_HOSTNAME ".local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
+#if !BOARD_HAS_WIFIMANAGER
+        // Name the network that actually exists. This used to read "join SkyGlass-Setup"
+        // on both boards, and neither of them broadcasts that -- the S3 raises
+        // SkyGlass-S3-Setup and the P4 SkyGlass-P4-Setup. Following the on-screen
+        // instruction found nothing.
+        else if (g_setupApUp)
+            snprintf(net, sizeof(net), "WiFi setup:\njoin " BOARD_SETUP_AP "\nthen open http://%s/",
+                     WiFi.softAPIP().toString().c_str());
+        else if (g_setupApFail)
+            snprintf(net, sizeof(net), "No WiFi.\nSetup AP unavailable -\nuse USB serial");
         else
-            snprintf(net, sizeof(net), "WiFi setup:\njoin SkyGlass-Setup");
+            snprintf(net, sizeof(net), "Connecting...\nsetup network in %lus",
+                     (unsigned long)((WIFI_PORTAL_AFTER_MS -
+                                      LV_MIN(millis() - g_staWaitMs, WIFI_PORTAL_AFTER_MS)) / 1000));
+#else
+        else
+            snprintf(net, sizeof(net), "WiFi setup:\njoin " BOARD_SETUP_AP);
+#endif
         ui_set_netinfo(net);
         const bool bpresent = battery_present();
         ui_set_battery(battery_percent(), battery_charging(), bpresent);
