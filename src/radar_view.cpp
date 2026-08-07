@@ -1506,6 +1506,23 @@ void update(const std::vector<Aircraft> &aircraft, const RadarSettings &s) {
     s_lastUpdateMs = now;
     s_animStartMs  = now;
 
+    // Carry each contact's label placement across the rebuild, keyed by ICAO hex.
+    // AcDraw is constructed fresh every poll and the whole vector is replaced here, so
+    // without this every label re-derived its position about once a second and visibly
+    // jumped -- the hysteresis in layout_labels() only ever applied within a single poll
+    // interval, which is to say it never applied at all.
+    {
+        std::map<std::string, lv_point_t> keepOfs;
+        for (const AcDraw &prev : s_acs)
+            if (prev.lblSet) keepOfs[std::string(prev.hex)] = lv_point_t{ prev.lblDx, prev.lblDy };
+        for (AcDraw &nx : out) {
+            const auto it = keepOfs.find(std::string(nx.hex));
+            if (it == keepOfs.end()) continue;
+            nx.lblDx = it->second.x;
+            nx.lblDy = it->second.y;
+            nx.lblSet = true;
+        }
+    }
     s_acs = std::move(out);
     if (s_acLayer) lv_obj_invalidate(s_acLayer);
 }
