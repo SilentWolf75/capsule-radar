@@ -515,32 +515,48 @@ static void wedge_bbox(float deg, lv_area_t *out) {
 
 // glyph + label bounding box (for partial invalidation during the glide).
 // Must cover the label areas drawn in the aircraft layer (they grew for large-text mode).
-// How far a floating label may be pushed from its glyph when routing around chrome.
-// glyph_bbox() has to cover the result: it is both the per-band draw cull and the
-// invalidate-on-move region, so a label outside it is culled away and never appears.
+// How far a floating label may be pushed from its glyph when routing around obstacles.
+// Purely a taste limit now -- a label further than this from its aircraft stops reading
+// as belonging to it -- since glyph_bbox() below tracks the real position rather than a
+// worst case.
 #define LBL_MAX_DX 135
 #define LBL_MAX_DY 120
 
-static inline lv_area_t glyph_bbox(lv_point_t p) {
+// Everything a contact paints: the glyph, plus its floating label wherever
+// layout_labels() has put it. This box is BOTH the invalidate-on-move region and the
+// per-band draw cull, so it has to cover the label *exactly*.
+//
+// It used to assume the label sat to the right (p.x-22 .. p.x+174) and was only widened
+// for contacts near the chrome. Once labels could also route left to dodge each other,
+// a left-placed callsign fell outside the box anywhere on the scope: LVGL repaints in
+// horizontal bands, so it was culled mid-band and rendered in fragments -- "N181CA"
+// arriving on screen as "A" -- and moving it left stale pixels behind.
+static inline lv_area_t glyph_bbox(const AcDraw &ac, lv_point_t p) {
     lv_area_t a;
-    if (orb()) { a.x1 = p.x - 30; a.y1 = p.y - 30; a.x2 = p.x + 30;  a.y2 = p.y + 30; }
-    else          { a.x1 = p.x - 22; a.y1 = p.y - 22; a.x2 = p.x + 174; a.y2 = p.y + 32; }
-    // Contacts near the chrome get their labels re-routed and can draw well outside the
-    // box above. Widen only for those: the box is repainted whenever the contact moves,
-    // and applying the worst case to every aircraft multiplies the redraw area sevenfold.
-    if (!orb()) {
-        for (int i = 0; i < radar::KEEPOUT_SLOTS; ++i) {
-            const lv_area_t &k = s_keepOut[i];
-            if (!keepout_live(k)) continue;
-            if (a.x2 + LBL_MAX_DX < k.x1 || a.x1 - LBL_MAX_DX > k.x2 ||
-                a.y2 + LBL_MAX_DY < k.y1 || a.y1 - LBL_MAX_DY > k.y2) continue;
-            a.x1 = p.x - LBL_MAX_DX; a.y1 = p.y - LBL_MAX_DY;
-            a.x2 = p.x + 180;        a.y2 = p.y + LBL_MAX_DY;
-            break;
+    if (orb()) { a.x1 = p.x - 30; a.y1 = p.y - 30; a.x2 = p.x + 30; a.y2 = p.y + 30; return a; }
+    a.x1 = p.x - 22; a.y1 = p.y - 22; a.x2 = p.x + 22; a.y2 = p.y + 32;
+    if (ac.lblW > 0) {
+        const float gk = (float)SCREEN_W / (float)UI_DESIGN_W;
+        if (ac.lblSet) {
+            const lv_coord_t lx0 = (lv_coord_t)(p.x + ac.lblDx);
+            const lv_coord_t ly0 = (lv_coord_t)(p.y - 14 * gk + ac.lblDy);
+            const lv_coord_t lx1 = (lv_coord_t)(lx0 + ac.lblW);
+            const lv_coord_t ly1 = (lv_coord_t)(p.y + 26 * gk + ac.lblDy);
+            if (lx0 < a.x1) a.x1 = lx0;
+            if (ly0 < a.y1) a.y1 = ly0;
+            if (lx1 > a.x2) a.x2 = lx1;
+            if (ly1 > a.y2) a.y2 = ly1;
+        } else {
+            // Not placed yet: cover the default right-hand spot it will be drawn in.
+            a.x2 = (lv_coord_t)(p.x + 12 * gk + ac.lblW);
+            a.y1 = (lv_coord_t)(p.y - 14 * gk);
+            a.y2 = (lv_coord_t)(p.y + 26 * gk);
         }
     }
+    a.x1 -= 2; a.y1 -= 2; a.x2 += 2; a.y2 += 2;   // slack for glyph antialiasing
     return a;
 }
+
 static inline void area_union(lv_area_t &d, const lv_area_t &s) {
     d.x1 = LV_MIN(d.x1, s.x1); d.y1 = LV_MIN(d.y1, s.y1);
     d.x2 = LV_MAX(d.x2, s.x2); d.y2 = LV_MAX(d.y2, s.y2);
@@ -566,8 +582,8 @@ static void interp_step(void) {
         const lv_coord_t ny = ac.from.y + (lv_coord_t)lroundf((float)(ac.to.y - ac.from.y) * e);
         if (nx == ac.pos.x && ny == ac.pos.y) continue;
         lv_point_t np; np.x = nx; np.y = ny;
-        lv_area_t inv = glyph_bbox(ac.pos);
-        area_union(inv, glyph_bbox(np));
+        lv_area_t inv = glyph_bbox(ac, ac.pos);
+        area_union(inv, glyph_bbox(ac, np));
         ac.pos = np;
         lv_obj_invalidate_area(s_acLayer, &inv);
     }
@@ -678,13 +694,15 @@ static void layout_labels(void) {
 
         const lv_coord_t ndx = (lv_coord_t)(bestX - ac.pos.x);
         if (!ac.lblSet || ndx != ac.lblDx || bestDy != ac.lblDy) {
-            ac.lblSet = true;
-            // A label can move because a *neighbour* moved, with this glyph perfectly
-            // still, so repaint it here -- interp_step only invalidates what it moves.
-            lv_area_t inv = glyph_bbox(ac.pos);
-            lv_obj_invalidate_area(s_acLayer, &inv);
+            // Repaint what it is leaving as well as where it lands, and do it here: a
+            // label can move because a *neighbour* moved while this glyph sits perfectly
+            // still, and interp_step only invalidates contacts it actually moved.
+            lv_area_t inv = glyph_bbox(ac, ac.pos);
             ac.lblDx = ndx;
             ac.lblDy = bestDy;
+            ac.lblSet = true;
+            area_union(inv, glyph_bbox(ac, ac.pos));
+            lv_obj_invalidate_area(s_acLayer, &inv);
         }
         if (nPlaced < (int)(sizeof(placed) / sizeof(placed[0]))) {
             lv_area_t r = { bestX, (lv_coord_t)(yTop + bestDy),
@@ -883,7 +901,7 @@ static void ac_draw_cb(lv_event_t *e) {
         // The sweep invalidates a large box every frame; without this, every aircraft
         // was redrawn for every region even when nowhere near it.
         if (d->clip_area) {
-            const lv_area_t bb = glyph_bbox(ac.pos);
+            const lv_area_t bb = glyph_bbox(ac, ac.pos);
             if (!area_overlaps(bb, *d->clip_area)) continue;
         }
 
